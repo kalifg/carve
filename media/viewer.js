@@ -6,11 +6,22 @@ import OpenSCAD from 'openscad';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import {
-  PREVIEW_2D_FORMAT,
-  PREVIEW_3D_FORMAT,
-  fallbackPreviewFormat
-} from 'carve-preview-format';
+
+// Keep the preview-format selection in this entry module. VS Code webviews
+// resolve the import map before executing any module code, so an unresolved
+// helper import prevents even the WASM error handler from running.
+const PREVIEW_3D_FORMAT = 'binstl';
+const PREVIEW_2D_FORMAT = 'svg';
+
+function fallbackPreviewFormat(format, stderr) {
+  if (format === PREVIEW_3D_FORMAT && /not a 3D object/i.test(stderr)) {
+    return PREVIEW_2D_FORMAT;
+  }
+  if (format === PREVIEW_2D_FORMAT && /not a 2D object/i.test(stderr)) {
+    return PREVIEW_3D_FORMAT;
+  }
+  return undefined;
+}
 
 const vscode = acquireVsCodeApi();
 const $status = document.getElementById('status');
