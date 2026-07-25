@@ -33,3 +33,9 @@ test('the 2D fallback does not add another webview startup module', () => {
   assert.match(viewerSource, /function fallbackPreviewFormat\(/);
   assert.doesNotMatch(extensionSource, /carve-preview-format/);
 });
+
+test('every WASM instance receives output hooks during construction', () => {
+  assert.equal(viewerSource.match(/print: capture\.print,/g)?.length, 2);
+  assert.equal(viewerSource.match(/printErr: capture\.printErr/g)?.length, 2);
+  assert.doesNotMatch(viewerSource, /Module\.printErr\s*=/);
+});

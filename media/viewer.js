@@ -34,12 +34,12 @@ const setStatus = (text, isError = false) => {
   $status.classList.toggle('error', !!isError);
 };
 
-function captureOutput(Module) {
+function createOutputCapture() {
   const out = [];
   const err = [];
-  Module.print = (s) => out.push(s);
-  Module.printErr = (s) => err.push(s);
   return {
+    print: (s) => out.push(s),
+    printErr: (s) => err.push(s),
     stdout: () => out.join('\n'),
     stderr: () => err.join('\n'),
     reset: () => { out.length = 0; err.length = 0; }
@@ -53,14 +53,16 @@ let Module; // current instance, replaced per render
 try {
   const wasmUrl = new URL(import.meta.resolve('openscad-wasm'));
   wasmBinary = await fetch(wasmUrl).then((r) => r.arrayBuffer());
+  capture = createOutputCapture();
   // Eager-instantiate once so the first render is fast.
   Module = await OpenSCAD({
     noInitialRun: true,
     noExitRuntime: true,
     wasmBinary,
-    locateFile: () => wasmUrl.toString()
+    locateFile: () => wasmUrl.toString(),
+    print: capture.print,
+    printErr: capture.printErr
   });
-  capture = captureOutput(Module);
   setStatus('Ready.');
   vscode.postMessage({ type: 'ready' });
 } catch (e) {
@@ -71,13 +73,15 @@ try {
 
 async function freshModule() {
   const wasmUrl = new URL(import.meta.resolve('openscad-wasm'));
+  capture = createOutputCapture();
   const M = await OpenSCAD({
     noInitialRun: true,
     noExitRuntime: true,
     wasmBinary,
-    locateFile: () => wasmUrl.toString()
+    locateFile: () => wasmUrl.toString(),
+    print: capture.print,
+    printErr: capture.printErr
   });
-  capture = captureOutput(M);
   return M;
 }
 
@@ -199,7 +203,7 @@ async function renderToScene(code) {
   if (myId !== pending) return; // superseded
   const ms = (performance.now() - t0).toFixed(0);
   if (!result.success) {
-    setStatus(`Error (${ms} ms)`, true);
+    setStatus(`Error (${ms} ms)\n${result.stderr || 'OpenSCAD produced no diagnostic output.'}`, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: result.stderr });
     return;
   }
