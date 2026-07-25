@@ -6,10 +6,17 @@ import OpenSCAD from 'openscad';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import {
+  PREVIEW_2D_FORMAT,
+  PREVIEW_3D_FORMAT,
+  fallbackPreviewFormat
+} from 'carve-preview-format';
 
 const vscode = acquireVsCodeApi();
 const $status = document.getElementById('status');
 const canvas = document.getElementById('viewer');
+const viewer2d = document.getElementById('viewer2d');
+const svgPreview = document.getElementById('svgPreview');
 
 const setStatus = (text, isError = false) => {
   $status.textContent = text;
@@ -78,12 +85,14 @@ scene.add(dir);
 scene.add(new THREE.GridHelper(100, 10, 0x444466, 0x333344));
 
 let mesh = null;
+let svgObjectUrl = null;
 const material = new THREE.MeshStandardMaterial({
   color: 0xf9b233, metalness: 0.1, roughness: 0.6, flatShading: true
 });
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (w === 0 || h === 0) return;
   if (canvas.width !== w || canvas.height !== h) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
@@ -128,11 +137,54 @@ async function runOpenscad(code, format) {
   return { success: true, data, stderr: capture.stderr() };
 }
 
+let preferredPreviewFormat = PREVIEW_3D_FORMAT;
+async function runPreview(code) {
+  const format = preferredPreviewFormat;
+  const result = await runOpenscad(code, format);
+  if (result.success) return { ...result, format };
+
+  const fallbackFormat = fallbackPreviewFormat(format, result.stderr);
+  if (!fallbackFormat) return { ...result, format };
+
+  const fallbackResult = await runOpenscad(code, fallbackFormat);
+  if (fallbackResult.success) preferredPreviewFormat = fallbackFormat;
+  return { ...fallbackResult, format: fallbackFormat };
+}
+
+function show3d(stl) {
+  viewer2d.hidden = true;
+  canvas.hidden = false;
+
+  const geom = new STLLoader().parse(
+    stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength)
+  );
+  geom.computeVertexNormals();
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  mesh = new THREE.Mesh(geom, material);
+  mesh.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
+  scene.add(mesh);
+  geom.computeBoundingSphere();
+  const r = Math.max(20, geom.boundingSphere.radius);
+  camera.position.set(r * 2, r * 2, r * 2);
+  controls.target.set(0, 0, 0);
+  controls.update();
+  return geom.attributes.position.count / 3;
+}
+
+function show2d(svg) {
+  canvas.hidden = true;
+  viewer2d.hidden = false;
+
+  if (svgObjectUrl) URL.revokeObjectURL(svgObjectUrl);
+  svgObjectUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  svgPreview.src = svgObjectUrl;
+}
+
 async function renderToScene(code) {
   const myId = ++pending;
   const t0 = performance.now();
   setStatus('Rendering\u2026');
-  const result = await runOpenscad(code, 'binstl');
+  const result = await runPreview(code);
   if (myId !== pending) return; // superseded
   const ms = (performance.now() - t0).toFixed(0);
   if (!result.success) {
@@ -140,26 +192,17 @@ async function renderToScene(code) {
     vscode.postMessage({ type: 'rendered', success: false, stderr: result.stderr });
     return;
   }
-  const stl = result.data;
   try {
-    const geom = new STLLoader().parse(stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength));
-    geom.computeVertexNormals();
-    if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
-    mesh = new THREE.Mesh(geom, material);
-    mesh.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
-    scene.add(mesh);
-    geom.computeBoundingSphere();
-    const r = Math.max(20, geom.boundingSphere.radius);
-    if (mesh.__isFirst !== false) {
-      camera.position.set(r * 2, r * 2, r * 2);
-      controls.target.set(0, 0, 0);
-      mesh.__isFirst = false;
+    if (result.format === PREVIEW_2D_FORMAT) {
+      show2d(result.data);
+      setStatus(`OK \u00b7 ${ms} ms \u00b7 2D SVG \u00b7 ${result.data.byteLength.toLocaleString()} B`);
+    } else {
+      const tris = show3d(result.data);
+      setStatus(`OK \u00b7 ${ms} ms \u00b7 3D \u00b7 ${tris.toLocaleString()} triangles \u00b7 ${result.data.byteLength.toLocaleString()} B`);
     }
-    const tris = geom.attributes.position.count / 3;
-    setStatus(`OK \u00b7 ${ms} ms \u00b7 ${tris.toLocaleString()} triangles \u00b7 ${stl.byteLength.toLocaleString()} B`);
     vscode.postMessage({ type: 'rendered', success: true, stderr: result.stderr });
   } catch (e) {
-    setStatus('STL parse failed: ' + e.message, true);
+    setStatus('Preview failed: ' + e.message, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: String(e) });
   }
 }

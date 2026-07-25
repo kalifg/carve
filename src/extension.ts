@@ -189,6 +189,7 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
   const threeJs  = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, 'three.module.js'));
   const orbitJs  = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, 'OrbitControls.js'));
   const stlJs    = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, 'STLLoader.js'));
+  const previewFormatJs = webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, 'preview-format.mjs'));
   const nonce = getNonce();
   const csp = [
     `default-src 'none'`,
@@ -214,11 +215,20 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
             max-height: 50vh; overflow-y: auto; white-space: pre-wrap;
             word-break: break-word; }
   #viewer { width: 100vw; height: 100vh; display: block; }
+  #viewer2d { width: 100vw; height: 100vh; display: grid; place-items: center;
+              overflow: hidden;
+              background-color: #f7f7f7;
+              background-image: linear-gradient(#e4e4e4 1px, transparent 1px),
+                                linear-gradient(90deg, #e4e4e4 1px, transparent 1px);
+              background-size: 20px 20px; }
+  #svgPreview { display: block; width: 100%; height: 100%; object-fit: contain; }
+  [hidden] { display: none !important; }
   #status.error { background: rgba(150,30,30,0.75); }
 </style>
 </head>
 <body>
 <canvas id="viewer"></canvas>
+<div id="viewer2d" hidden><img id="svgPreview" alt="OpenSCAD 2D preview" /></div>
 <div id="status">Loading OpenSCAD WebAssembly\u2026</div>
 <script type="importmap" nonce="${nonce}">
 {
@@ -227,7 +237,8 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
     "openscad-wasm": "${wasmBin}",
     "three": "${threeJs}",
     "three/addons/controls/OrbitControls.js": "${orbitJs}",
-    "three/addons/loaders/STLLoader.js": "${stlJs}"
+    "three/addons/loaders/STLLoader.js": "${stlJs}",
+    "carve-preview-format": "${previewFormatJs}"
   }
 }
 </script>

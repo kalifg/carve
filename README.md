@@ -4,13 +4,14 @@
   <img src="images/icon.png" width="120" alt="Carve icon" />
 </p>
 
-**Carve** is a VS Code extension that gives you a live, no-install 3D preview of [OpenSCAD](https://openscad.org/) `.scad` files — entirely in-browser via WebAssembly. No native OpenSCAD binary required.
+**Carve** is a VS Code extension that gives you a live, no-install 2D and 3D preview of [OpenSCAD](https://openscad.org/) `.scad` files — entirely in-browser via WebAssembly. No native OpenSCAD binary required.
 
 ![Carve hero](images/hero.png)
 
 ## Features
 
 - 🔄 **Live preview** — open any `.scad` file, hit `Ctrl+K V`, and watch your model update as you type
+- 📐 **2D geometry** — previews top-level 2D models as SVG, automatically switching between 2D and 3D as you edit
 - 🧱 **Self-contained** — ships the full OpenSCAD engine as ~10 MB of WebAssembly, plus a Three.js mesh viewer
 - 🧭 **OrbitControls** — drag to orbit, scroll to zoom, right-click to pan
 - 📤 **Export** — STL / 3MF / OFF / AMF / OBJ via `Carve: Export STL`

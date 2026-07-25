@@ -1,5 +1,9 @@
 # Change Log
 
+## Unreleased
+- Add SVG previews for top-level 2D geometry
+- Automatically switch between SVG and STL when a model changes dimensionality
+
 ## 0.1.5 — 2026-05-16
 - Corrected publisher ID to `carve3d` (first marketplace release)
 

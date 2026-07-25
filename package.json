@@ -1,7 +1,7 @@
 {
   "name": "carve",
   "displayName": "Carve — OpenSCAD Live Preview",
-  "description": "Live 3D preview for OpenSCAD (.scad) files using a bundled WebAssembly build — no native OpenSCAD install required.",
+  "description": "Live 2D and 3D preview for OpenSCAD (.scad) files using a bundled WebAssembly build — no native OpenSCAD install required.",
   "version": "0.1.5",
   "publisher": "carve3d",
   "license": "MIT",
@@ -76,6 +76,7 @@
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "node esbuild.config.mjs",
+    "test": "node --test",
     "package": "node esbuild.config.mjs --production",
     "watch":   "node esbuild.config.mjs --watch",
     "vsix":    "vsce package --no-dependencies"
