@@ -39,3 +39,13 @@ test('every WASM instance receives output hooks during construction', () => {
   assert.equal(viewerSource.match(/printErr: capture\.printErr/g)?.length, 2);
   assert.doesNotMatch(viewerSource, /Module\.printErr\s*=/);
 });
+
+test('the 2D viewer supports fit, pointer-centered zoom, pan, and axes', () => {
+  assert.match(viewerSource, /function fit2d\(/);
+  assert.match(viewerSource, /addEventListener\('wheel'/);
+  assert.match(viewerSource, /setPointerCapture\(event\.pointerId\)/);
+  assert.match(viewerSource, /strokeStyle = '#d64545'/);
+  assert.match(viewerSource, /strokeStyle = '#36a269'/);
+  assert.match(extensionSource, /id="viewer2dGrid"/);
+  assert.match(extensionSource, /id="fit2d"/);
+});

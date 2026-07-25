@@ -27,7 +27,9 @@ const vscode = acquireVsCodeApi();
 const $status = document.getElementById('status');
 const canvas = document.getElementById('viewer');
 const viewer2d = document.getElementById('viewer2d');
+const viewer2dGrid = document.getElementById('viewer2dGrid');
 const svgPreview = document.getElementById('svgPreview');
+const fit2dButton = document.getElementById('fit2d');
 
 const setStatus = (text, isError = false) => {
   $status.textContent = text;
@@ -101,18 +103,25 @@ scene.add(new THREE.GridHelper(100, 10, 0x444466, 0x333344));
 
 let mesh = null;
 let svgObjectUrl = null;
+let svgBounds = null;
+let view2dScale = 1;
+let view2dOffsetX = 0;
+let view2dOffsetY = 0;
+let view2dIsFitted = true;
+let view2dWidth = 0;
+let view2dHeight = 0;
 const material = new THREE.MeshStandardMaterial({
   color: 0xf9b233, metalness: 0.1, roughness: 0.6, flatShading: true
 });
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  if (w === 0 || h === 0) return;
-  if (canvas.width !== w || canvas.height !== h) {
+  if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
+  resize2d();
 }
 function loop() {
   requestAnimationFrame(loop);
@@ -186,13 +195,183 @@ function show3d(stl) {
   return geom.attributes.position.count / 3;
 }
 
+function parseSvgBounds(svg) {
+  const source = new TextDecoder().decode(svg);
+  const match = source.match(/\bviewBox\s*=\s*["']([^"']+)["']/i);
+  if (!match) throw new Error('OpenSCAD SVG has no viewBox.');
+  const values = match[1].trim().split(/[\s,]+/).map(Number);
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value)) ||
+      values[2] <= 0 || values[3] <= 0) {
+    throw new Error('OpenSCAD SVG has an invalid viewBox.');
+  }
+  return { x: values[0], y: values[1], width: values[2], height: values[3] };
+}
+
+function gridStepForScale(scale) {
+  const targetModelUnits = 64 / scale;
+  const power = 10 ** Math.floor(Math.log10(targetModelUnits));
+  const normalized = targetModelUnits / power;
+  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return multiplier * power;
+}
+
+function draw2dGrid() {
+  if (!svgBounds || viewer2d.hidden || view2dWidth === 0 || view2dHeight === 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  const pixelWidth = Math.round(view2dWidth * dpr);
+  const pixelHeight = Math.round(view2dHeight * dpr);
+  if (viewer2dGrid.width !== pixelWidth || viewer2dGrid.height !== pixelHeight) {
+    viewer2dGrid.width = pixelWidth;
+    viewer2dGrid.height = pixelHeight;
+  }
+
+  const ctx = viewer2dGrid.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, view2dWidth, view2dHeight);
+
+  const step = gridStepForScale(view2dScale);
+  const minX = -view2dOffsetX / view2dScale;
+  const maxX = (view2dWidth - view2dOffsetX) / view2dScale;
+  const minSvgY = -view2dOffsetY / view2dScale;
+  const maxSvgY = (view2dHeight - view2dOffsetY) / view2dScale;
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#dfdfdf';
+  ctx.lineWidth = 1;
+  for (let x = Math.ceil(minX / step) * step; x <= maxX; x += step) {
+    const screenX = view2dOffsetX + x * view2dScale;
+    ctx.moveTo(screenX, 0);
+    ctx.lineTo(screenX, view2dHeight);
+  }
+  for (let y = Math.ceil(minSvgY / step) * step; y <= maxSvgY; y += step) {
+    const screenY = view2dOffsetY + y * view2dScale;
+    ctx.moveTo(0, screenY);
+    ctx.lineTo(view2dWidth, screenY);
+  }
+  ctx.stroke();
+
+  const originX = view2dOffsetX;
+  const originY = view2dOffsetY;
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textBaseline = 'top';
+
+  if (originY >= 0 && originY <= view2dHeight) {
+    ctx.beginPath();
+    ctx.strokeStyle = '#d64545';
+    ctx.lineWidth = 1.5;
+    ctx.moveTo(0, originY);
+    ctx.lineTo(view2dWidth, originY);
+    ctx.stroke();
+    ctx.fillStyle = '#b52d2d';
+    ctx.fillText('X', view2dWidth - 20, Math.min(view2dHeight - 18, originY + 5));
+  }
+  if (originX >= 0 && originX <= view2dWidth) {
+    ctx.beginPath();
+    ctx.strokeStyle = '#36a269';
+    ctx.lineWidth = 1.5;
+    ctx.moveTo(originX, 0);
+    ctx.lineTo(originX, view2dHeight);
+    ctx.stroke();
+    ctx.fillStyle = '#25784d';
+    ctx.fillText('Y', Math.min(view2dWidth - 18, originX + 6), 30);
+  }
+}
+
+function update2dTransform() {
+  if (!svgBounds) return;
+  svgPreview.style.width = `${svgBounds.width}px`;
+  svgPreview.style.height = `${svgBounds.height}px`;
+  const imageX = view2dOffsetX + svgBounds.x * view2dScale;
+  const imageY = view2dOffsetY + svgBounds.y * view2dScale;
+  svgPreview.style.transform = `translate(${imageX}px, ${imageY}px) scale(${view2dScale})`;
+  draw2dGrid();
+}
+
+function fit2d() {
+  if (!svgBounds) return;
+  const width = viewer2d.clientWidth;
+  const height = viewer2d.clientHeight;
+  if (width === 0 || height === 0) return;
+  const padding = Math.max(32, Math.min(width, height) * 0.07);
+  view2dScale = Math.min(
+    (width - padding * 2) / svgBounds.width,
+    (height - padding * 2) / svgBounds.height
+  );
+  view2dOffsetX = (width - svgBounds.width * view2dScale) / 2 - svgBounds.x * view2dScale;
+  view2dOffsetY = (height - svgBounds.height * view2dScale) / 2 - svgBounds.y * view2dScale;
+  view2dIsFitted = true;
+  update2dTransform();
+}
+
+function resize2d() {
+  if (viewer2d.hidden) return;
+  const width = viewer2d.clientWidth;
+  const height = viewer2d.clientHeight;
+  if (width === 0 || height === 0 || (width === view2dWidth && height === view2dHeight)) return;
+  view2dWidth = width;
+  view2dHeight = height;
+  if (view2dIsFitted) fit2d();
+  else update2dTransform();
+}
+
+viewer2d.addEventListener('wheel', (event) => {
+  if (!svgBounds) return;
+  event.preventDefault();
+  const rect = viewer2d.getBoundingClientRect();
+  const pointerX = event.clientX - rect.left;
+  const pointerY = event.clientY - rect.top;
+  const modelX = (pointerX - view2dOffsetX) / view2dScale;
+  const modelY = (pointerY - view2dOffsetY) / view2dScale;
+  const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+  const newScale = Math.min(500, Math.max(0.02, view2dScale * zoomFactor));
+  view2dOffsetX = pointerX - modelX * newScale;
+  view2dOffsetY = pointerY - modelY * newScale;
+  view2dScale = newScale;
+  view2dIsFitted = false;
+  update2dTransform();
+}, { passive: false });
+
+let pan2dPointerId = null;
+let pan2dX = 0;
+let pan2dY = 0;
+viewer2d.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || event.target === fit2dButton) return;
+  pan2dPointerId = event.pointerId;
+  pan2dX = event.clientX;
+  pan2dY = event.clientY;
+  viewer2d.setPointerCapture(event.pointerId);
+  viewer2d.classList.add('panning');
+});
+viewer2d.addEventListener('pointermove', (event) => {
+  if (event.pointerId !== pan2dPointerId) return;
+  view2dOffsetX += event.clientX - pan2dX;
+  view2dOffsetY += event.clientY - pan2dY;
+  pan2dX = event.clientX;
+  pan2dY = event.clientY;
+  view2dIsFitted = false;
+  update2dTransform();
+});
+function end2dPan(event) {
+  if (event.pointerId !== pan2dPointerId) return;
+  pan2dPointerId = null;
+  viewer2d.classList.remove('panning');
+}
+viewer2d.addEventListener('pointerup', end2dPan);
+viewer2d.addEventListener('pointercancel', end2dPan);
+viewer2d.addEventListener('dblclick', fit2d);
+fit2dButton.addEventListener('click', fit2d);
+
 function show2d(svg) {
   canvas.hidden = true;
   viewer2d.hidden = false;
 
+  svgBounds = parseSvgBounds(svg);
   if (svgObjectUrl) URL.revokeObjectURL(svgObjectUrl);
   svgObjectUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   svgPreview.src = svgObjectUrl;
+  view2dWidth = viewer2d.clientWidth;
+  view2dHeight = viewer2d.clientHeight;
+  requestAnimationFrame(fit2d);
 }
 
 async function renderToScene(code) {

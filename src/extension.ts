@@ -208,26 +208,36 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
 <title>Carve Preview</title>
 <style>
   html, body { margin: 0; height: 100%; background: #2a2a3a; color: #ddd; font-family: var(--vscode-font-family); }
-  #status { position: absolute; top: 8px; left: 8px; right: 8px; padding: 4px 10px;
+  #status { position: absolute; z-index: 4; top: 8px; left: 8px; right: 8px; padding: 4px 10px;
             font: 12px var(--vscode-editor-font-family); background: rgba(0,0,0,0.45);
             border-radius: 4px; pointer-events: none;
             max-height: 50vh; overflow-y: auto; white-space: pre-wrap;
             word-break: break-word; }
   #viewer { width: 100vw; height: 100vh; display: block; }
-  #viewer2d { width: 100vw; height: 100vh; display: grid; place-items: center;
-              overflow: hidden;
-              background-color: #f7f7f7;
-              background-image: linear-gradient(#e4e4e4 1px, transparent 1px),
-                                linear-gradient(90deg, #e4e4e4 1px, transparent 1px);
-              background-size: 20px 20px; }
-  #svgPreview { display: block; width: 100%; height: 100%; object-fit: contain; }
+  #viewer2d { position: relative; width: 100vw; height: 100vh; overflow: hidden;
+              background: #f7f7f7; cursor: grab; touch-action: none; user-select: none; }
+  #viewer2d.panning { cursor: grabbing; }
+  #viewer2dGrid, #svgPreview { position: absolute; left: 0; top: 0; }
+  #viewer2dGrid { width: 100%; height: 100%; pointer-events: none; }
+  #svgPreview { display: block; max-width: none; max-height: none;
+                transform-origin: 0 0; pointer-events: none; user-select: none; }
+  #fit2d { position: absolute; z-index: 3; right: 10px; bottom: 10px;
+           border: 1px solid var(--vscode-button-border, #999);
+           border-radius: 4px; padding: 4px 9px;
+           color: var(--vscode-button-foreground, #fff);
+           background: var(--vscode-button-background, #555); cursor: pointer; }
+  #fit2d:hover { background: var(--vscode-button-hoverBackground, #666); }
   [hidden] { display: none !important; }
   #status.error { background: rgba(150,30,30,0.75); }
 </style>
 </head>
 <body>
 <canvas id="viewer"></canvas>
-<div id="viewer2d" hidden><img id="svgPreview" alt="OpenSCAD 2D preview" /></div>
+<div id="viewer2d" hidden>
+  <canvas id="viewer2dGrid"></canvas>
+  <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />
+  <button id="fit2d" type="button" title="Zoom to fit (double-click the canvas)">Fit</button>
+</div>
 <div id="status">Loading OpenSCAD WebAssembly\u2026</div>
 <script type="importmap" nonce="${nonce}">
 {
