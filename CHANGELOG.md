@@ -4,6 +4,7 @@
 - Add SVG previews for top-level 2D geometry
 - Automatically switch between SVG and STL when a model changes dimensionality
 - Add zoom-to-fit, wheel/pinch zoom, drag-to-pan, grid, and X/Y axes for 2D previews
+- Add adaptive numeric tick measurements along the 2D axes
 
 ## 0.1.5 — 2026-05-16
 - Corrected publisher ID to `carve3d` (first marketplace release)

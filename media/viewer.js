@@ -215,6 +215,13 @@ function gridStepForScale(scale) {
   return multiplier * power;
 }
 
+function formatAxisValue(value, step) {
+  const normalized = Math.abs(value) < step * 1e-6 ? 0 : value;
+  const decimals = Math.min(6, Math.max(0, -Math.floor(Math.log10(step))));
+  const fixed = normalized.toFixed(decimals);
+  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed;
+}
+
 function draw2dGrid() {
   if (!svgBounds || viewer2d.hidden || view2dWidth === 0 || view2dHeight === 0) return;
   const dpr = window.devicePixelRatio || 1;
@@ -252,8 +259,8 @@ function draw2dGrid() {
 
   const originX = view2dOffsetX;
   const originY = view2dOffsetY;
-  ctx.font = 'bold 12px sans-serif';
-  ctx.textBaseline = 'top';
+  const zeroTolerance = step * 1e-6;
+  ctx.font = '11px sans-serif';
 
   if (originY >= 0 && originY <= view2dHeight) {
     ctx.beginPath();
@@ -261,9 +268,39 @@ function draw2dGrid() {
     ctx.lineWidth = 1.5;
     ctx.moveTo(0, originY);
     ctx.lineTo(view2dWidth, originY);
+    ctx.moveTo(view2dWidth - 7, originY - 4);
+    ctx.lineTo(view2dWidth, originY);
+    ctx.lineTo(view2dWidth - 7, originY + 4);
+    const firstXTick = Math.ceil(minX / step);
+    const lastXTick = Math.floor(maxX / step);
+    for (let tick = firstXTick; tick <= lastXTick; tick++) {
+      const value = tick * step;
+      if (Math.abs(value) < zeroTolerance) continue;
+      const screenX = view2dOffsetX + value * view2dScale;
+      ctx.moveTo(screenX, originY - 4);
+      ctx.lineTo(screenX, originY + 4);
+    }
     ctx.stroke();
+
     ctx.fillStyle = '#b52d2d';
-    ctx.fillText('X', view2dWidth - 20, Math.min(view2dHeight - 18, originY + 5));
+    ctx.textAlign = 'center';
+    const labelsBelow = originY <= view2dHeight - 22;
+    ctx.textBaseline = labelsBelow ? 'top' : 'bottom';
+    const labelY = originY + (labelsBelow ? 6 : -6);
+    for (let tick = firstXTick; tick <= lastXTick; tick++) {
+      const value = tick * step;
+      if (Math.abs(value) < zeroTolerance) continue;
+      const screenX = view2dOffsetX + value * view2dScale;
+      const label = formatAxisValue(value, step);
+      const halfWidth = ctx.measureText(label).width / 2;
+      if (screenX > halfWidth + 2 && screenX < view2dWidth - halfWidth - 26) {
+        ctx.fillText(label, screenX, labelY);
+      }
+    }
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('X', view2dWidth - 9, labelY);
+    ctx.font = '11px sans-serif';
   }
   if (originX >= 0 && originX <= view2dWidth) {
     ctx.beginPath();
@@ -271,9 +308,44 @@ function draw2dGrid() {
     ctx.lineWidth = 1.5;
     ctx.moveTo(originX, 0);
     ctx.lineTo(originX, view2dHeight);
+    ctx.moveTo(originX - 4, 7);
+    ctx.lineTo(originX, 0);
+    ctx.lineTo(originX + 4, 7);
+    const firstYTick = Math.ceil(minSvgY / step);
+    const lastYTick = Math.floor(maxSvgY / step);
+    for (let tick = firstYTick; tick <= lastYTick; tick++) {
+      const svgValue = tick * step;
+      if (Math.abs(svgValue) < zeroTolerance) continue;
+      const screenY = view2dOffsetY + svgValue * view2dScale;
+      ctx.moveTo(originX - 4, screenY);
+      ctx.lineTo(originX + 4, screenY);
+    }
     ctx.stroke();
+
     ctx.fillStyle = '#25784d';
-    ctx.fillText('Y', Math.min(view2dWidth - 18, originX + 6), 30);
+    const labelsRight = originX <= view2dWidth - 46;
+    ctx.textAlign = labelsRight ? 'left' : 'right';
+    ctx.textBaseline = 'middle';
+    const labelX = originX + (labelsRight ? 7 : -7);
+    for (let tick = firstYTick; tick <= lastYTick; tick++) {
+      const svgValue = tick * step;
+      if (Math.abs(svgValue) < zeroTolerance) continue;
+      const screenY = view2dOffsetY + svgValue * view2dScale;
+      if (screenY > 24 && screenY < view2dHeight - 9) {
+        // SVG's screen Y direction is opposite OpenSCAD's model Y direction.
+        ctx.fillText(formatAxisValue(-svgValue, step), labelX, screenY);
+      }
+    }
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Y', labelX, 9);
+    ctx.font = '11px sans-serif';
+  }
+  if (originX >= 0 && originX <= view2dWidth && originY >= 0 && originY <= view2dHeight) {
+    ctx.fillStyle = '#555';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('0', originX + 6, originY + 6);
   }
 }
 

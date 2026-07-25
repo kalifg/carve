@@ -49,3 +49,10 @@ test('the 2D viewer supports fit, pointer-centered zoom, pan, and axes', () => {
   assert.match(extensionSource, /id="viewer2dGrid"/);
   assert.match(extensionSource, /id="fit2d"/);
 });
+
+test('2D axis measurements adapt to zoom and preserve OpenSCAD Y direction', () => {
+  assert.match(viewerSource, /function formatAxisValue\(/);
+  assert.match(viewerSource, /formatAxisValue\(value, step\)/);
+  assert.match(viewerSource, /formatAxisValue\(-svgValue, step\)/);
+  assert.match(viewerSource, /const step = gridStepForScale\(view2dScale\)/);
+});
