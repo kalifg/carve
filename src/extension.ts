@@ -214,6 +214,8 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
             max-height: 50vh; overflow-y: auto; white-space: pre-wrap;
             word-break: break-word; }
   #viewer { width: 100vw; height: 100vh; display: block; }
+  #emptyPreview { width: 100vw; height: 100vh; display: grid; place-items: center;
+                  color: var(--vscode-descriptionForeground, #aaa); font-size: 13px; }
   #viewer2d { position: relative; width: 100vw; height: 100vh; overflow: hidden;
               background: #f7f7f7; cursor: grab; touch-action: none; user-select: none; }
   #viewer2d.panning { cursor: grabbing; }
@@ -233,6 +235,7 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
 </head>
 <body>
 <canvas id="viewer"></canvas>
+<div id="emptyPreview" hidden>No top-level geometry to preview</div>
 <div id="viewer2d" hidden>
   <canvas id="viewer2dGrid"></canvas>
   <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />

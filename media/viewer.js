@@ -13,6 +13,18 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 const PREVIEW_3D_FORMAT = 'binstl';
 const PREVIEW_2D_FORMAT = 'svg';
 
+function cleanStderr(stderr) {
+  return String(stderr ?? '')
+    .split('\n')
+    .filter((line) => !/Could not initialize localization\s+\(application path is ['"]\/['"]\)\.?/i.test(line))
+    .join('\n')
+    .trim();
+}
+
+function isEmptyTopLevel(stderr) {
+  return /Current top level object is empty/i.test(stderr);
+}
+
 function fallbackPreviewFormat(format, stderr) {
   if (format === PREVIEW_3D_FORMAT && /not a 3D object/i.test(stderr)) {
     return PREVIEW_2D_FORMAT;
@@ -27,6 +39,7 @@ const vscode = acquireVsCodeApi();
 const $status = document.getElementById('status');
 const canvas = document.getElementById('viewer');
 const viewer2d = document.getElementById('viewer2d');
+const emptyPreview = document.getElementById('emptyPreview');
 const viewer2dGrid = document.getElementById('viewer2dGrid');
 const svgPreview = document.getElementById('svgPreview');
 const fit2dButton = document.getElementById('fit2d');
@@ -149,16 +162,16 @@ async function runOpenscad(code, format) {
   try {
     rc = Module.callMain(['/in.scad', '-o', '/out', '--export-format=' + format]);
   } catch (e) {
-    return { success: false, stderr: capture.stderr() || String(e) };
+    return { success: false, stderr: cleanStderr(capture.stderr()) || String(e) };
   }
   if (rc !== 0 && rc !== undefined) {
-    return { success: false, stderr: capture.stderr() || `OpenSCAD exited ${rc}` };
+    return { success: false, stderr: cleanStderr(capture.stderr()) || `OpenSCAD exited ${rc}` };
   }
   let data;
   try { data = Module.FS.readFile('/out'); } catch (e) {
-    return { success: false, stderr: capture.stderr() || 'No output produced' };
+    return { success: false, stderr: cleanStderr(capture.stderr()) || 'No output produced' };
   }
-  return { success: true, data, stderr: capture.stderr() };
+  return { success: true, data, stderr: cleanStderr(capture.stderr()) };
 }
 
 let preferredPreviewFormat = PREVIEW_3D_FORMAT;
@@ -166,24 +179,56 @@ async function runPreview(code) {
   const format = preferredPreviewFormat;
   const result = await runOpenscad(code, format);
   if (result.success) return { ...result, format };
+  if (isEmptyTopLevel(result.stderr)) {
+    return { ...result, success: true, empty: true, stderr: '', format };
+  }
 
   const fallbackFormat = fallbackPreviewFormat(format, result.stderr);
   if (!fallbackFormat) return { ...result, format };
 
   const fallbackResult = await runOpenscad(code, fallbackFormat);
+  if (isEmptyTopLevel(fallbackResult.stderr)) {
+    return { ...fallbackResult, success: true, empty: true, stderr: '', format: fallbackFormat };
+  }
   if (fallbackResult.success) preferredPreviewFormat = fallbackFormat;
   return { ...fallbackResult, format: fallbackFormat };
 }
 
+function clear3dPreview() {
+  if (!mesh) return;
+  scene.remove(mesh);
+  mesh.geometry.dispose();
+  mesh = null;
+}
+
+function clear2dPreview() {
+  if (svgObjectUrl) URL.revokeObjectURL(svgObjectUrl);
+  svgObjectUrl = null;
+  svgBounds = null;
+  svgPreview.removeAttribute('src');
+  const ctx = viewer2dGrid.getContext('2d');
+  ctx?.clearRect(0, 0, viewer2dGrid.width, viewer2dGrid.height);
+}
+
+function showEmpty() {
+  clear3dPreview();
+  clear2dPreview();
+  canvas.hidden = true;
+  viewer2d.hidden = true;
+  emptyPreview.hidden = false;
+}
+
 function show3d(stl) {
+  emptyPreview.hidden = true;
   viewer2d.hidden = true;
   canvas.hidden = false;
+  clear2dPreview();
 
   const geom = new STLLoader().parse(
     stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength)
   );
   geom.computeVertexNormals();
-  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  clear3dPreview();
   mesh = new THREE.Mesh(geom, material);
   mesh.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
   scene.add(mesh);
@@ -434,8 +479,10 @@ viewer2d.addEventListener('dblclick', fit2d);
 fit2dButton.addEventListener('click', fit2d);
 
 function show2d(svg) {
+  emptyPreview.hidden = true;
   canvas.hidden = true;
   viewer2d.hidden = false;
+  clear3dPreview();
 
   svgBounds = parseSvgBounds(svg);
   if (svgObjectUrl) URL.revokeObjectURL(svgObjectUrl);
@@ -459,7 +506,10 @@ async function renderToScene(code) {
     return;
   }
   try {
-    if (result.format === PREVIEW_2D_FORMAT) {
+    if (result.empty) {
+      showEmpty();
+      setStatus(`Empty \u00b7 ${ms} ms \u00b7 no top-level geometry`);
+    } else if (result.format === PREVIEW_2D_FORMAT) {
       show2d(result.data);
       setStatus(`OK \u00b7 ${ms} ms \u00b7 2D SVG \u00b7 ${result.data.byteLength.toLocaleString()} B`);
     } else {

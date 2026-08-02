@@ -56,3 +56,12 @@ test('2D axis measurements adapt to zoom and preserve OpenSCAD Y direction', () 
   assert.match(viewerSource, /formatAxisValue\(-svgValue, step\)/);
   assert.match(viewerSource, /const step = gridStepForScale\(view2dScale\)/);
 });
+
+test('empty geometry is a neutral preview state and localization noise is filtered', () => {
+  assert.match(viewerSource, /function cleanStderr\(/);
+  assert.match(viewerSource, /Could not initialize localization/);
+  assert.match(viewerSource, /function isEmptyTopLevel\(/);
+  assert.match(viewerSource, /empty: true/);
+  assert.match(viewerSource, /function showEmpty\(/);
+  assert.match(extensionSource, /id="emptyPreview"/);
+});

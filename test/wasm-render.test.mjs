@@ -57,6 +57,13 @@ test('bundled OpenSCAD WASM reports a dimensional mismatch for 2D STL', async ()
   assert.match(result.stderr, /not a 3D object/i);
 });
 
+test('bundled OpenSCAD WASM reports an empty top-level object', async () => {
+  const result = await render('module part() { cube(10); }', 'binstl');
+
+  assert.equal(result.success, false);
+  assert.match(result.stderr, /Current top level object is empty/i);
+});
+
 test('bundled OpenSCAD WASM still exports 3D geometry as binary STL', async () => {
   const result = await render('cube(10);', 'binstl');
 
