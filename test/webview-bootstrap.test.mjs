@@ -65,3 +65,11 @@ test('empty geometry is a neutral preview state and localization noise is filter
   assert.match(viewerSource, /function showEmpty\(/);
   assert.match(extensionSource, /id="emptyPreview"/);
 });
+
+test('mixed 2D and 3D geometry is rejected before a partial preview is shown', () => {
+  assert.match(viewerSource, /function isMixedDimensions\(/);
+  assert.match(viewerSource, /OpenSCAD would omit part of the model from the preview/);
+  assert.match(viewerSource, /mixedDimensions: true/);
+  assert.match(viewerSource, /function showPlaceholder\(/);
+  assert.match(viewerSource, /Mixed 2D and 3D geometry cannot be previewed together/);
+});

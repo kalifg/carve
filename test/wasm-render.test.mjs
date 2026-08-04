@@ -64,6 +64,19 @@ test('bundled OpenSCAD WASM reports an empty top-level object', async () => {
   assert.match(result.stderr, /Current top level object is empty/i);
 });
 
+test('bundled OpenSCAD WASM warns and drops geometry when dimensions are mixed', async () => {
+  const code = 'circle(10); translate([30, 0, 0]) cube(10);';
+  const stlResult = await render(code, 'binstl');
+  const svgResult = await render(code, 'svg');
+
+  assert.equal(stlResult.success, false);
+  assert.match(stlResult.stderr, /Mixing 2D and 3D objects is not supported/i);
+  assert.match(stlResult.stderr, /not a 3D object/i);
+  assert.equal(svgResult.success, true, svgResult.stderr);
+  assert.match(svgResult.stderr, /Mixing 2D and 3D objects is not supported/i);
+  assert.match(new TextDecoder().decode(svgResult.data), /<svg\b/);
+});
+
 test('bundled OpenSCAD WASM still exports 3D geometry as binary STL', async () => {
   const result = await render('cube(10);', 'binstl');
 

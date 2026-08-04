@@ -25,6 +25,21 @@ function isEmptyTopLevel(stderr) {
   return /Current top level object is empty/i.test(stderr);
 }
 
+function isMixedDimensions(stderr) {
+  return /Mixing 2D and 3D objects is not supported/i.test(stderr);
+}
+
+function mixedDimensionsDiagnostic(stderr) {
+  return [
+    'Mixed 2D and 3D geometry cannot be previewed together.',
+    'OpenSCAD would omit part of the model from the preview.',
+    'Use linear_extrude() or rotate_extrude() to make the 2D geometry 3D,',
+    'or projection() to make the 3D geometry 2D.',
+    '',
+    stderr
+  ].join('\n');
+}
+
 function fallbackPreviewFormat(format, stderr) {
   if (format === PREVIEW_3D_FORMAT && /not a 3D object/i.test(stderr)) {
     return PREVIEW_2D_FORMAT;
@@ -178,6 +193,15 @@ let preferredPreviewFormat = PREVIEW_3D_FORMAT;
 async function runPreview(code) {
   const format = preferredPreviewFormat;
   const result = await runOpenscad(code, format);
+  if (isMixedDimensions(result.stderr)) {
+    return {
+      ...result,
+      success: false,
+      mixedDimensions: true,
+      stderr: mixedDimensionsDiagnostic(result.stderr),
+      format
+    };
+  }
   if (result.success) return { ...result, format };
   if (isEmptyTopLevel(result.stderr)) {
     return { ...result, success: true, empty: true, stderr: '', format };
@@ -187,6 +211,15 @@ async function runPreview(code) {
   if (!fallbackFormat) return { ...result, format };
 
   const fallbackResult = await runOpenscad(code, fallbackFormat);
+  if (isMixedDimensions(fallbackResult.stderr)) {
+    return {
+      ...fallbackResult,
+      success: false,
+      mixedDimensions: true,
+      stderr: mixedDimensionsDiagnostic(fallbackResult.stderr),
+      format: fallbackFormat
+    };
+  }
   if (isEmptyTopLevel(fallbackResult.stderr)) {
     return { ...fallbackResult, success: true, empty: true, stderr: '', format: fallbackFormat };
   }
@@ -210,12 +243,17 @@ function clear2dPreview() {
   ctx?.clearRect(0, 0, viewer2dGrid.width, viewer2dGrid.height);
 }
 
-function showEmpty() {
+function showPlaceholder(message) {
   clear3dPreview();
   clear2dPreview();
   canvas.hidden = true;
   viewer2d.hidden = true;
+  emptyPreview.textContent = message;
   emptyPreview.hidden = false;
+}
+
+function showEmpty() {
+  showPlaceholder('No top-level geometry to preview');
 }
 
 function show3d(stl) {
@@ -501,6 +539,9 @@ async function renderToScene(code) {
   if (myId !== pending) return; // superseded
   const ms = (performance.now() - t0).toFixed(0);
   if (!result.success) {
+    if (result.mixedDimensions) {
+      showPlaceholder('Mixed 2D and 3D geometry cannot be previewed together');
+    }
     setStatus(`Error (${ms} ms)\n${result.stderr || 'OpenSCAD produced no diagnostic output.'}`, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: result.stderr });
     return;
