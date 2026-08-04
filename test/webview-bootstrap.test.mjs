@@ -74,6 +74,7 @@ test('mixed 2D and 3D geometry is detected before a partial preview is shown', (
 });
 
 test('independent mixed roots use a combined hybrid preview', () => {
+  assert.match(viewerSource, /mayContainMixedGeometry\(code\)/);
   assert.match(viewerSource, /function runHybridPreview\(/);
   assert.match(viewerSource, /splitTopLevelCsg\(/);
   assert.match(viewerSource, /wrap2dForPreview\(/);

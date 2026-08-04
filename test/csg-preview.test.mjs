@@ -1,7 +1,26 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { splitTopLevelCsg, wrap2dForPreview } from '../media/csg-preview.mjs';
+import {
+  mayContainMixedGeometry,
+  splitTopLevelCsg,
+  wrap2dForPreview
+} from '../media/csg-preview.mjs';
+
+test('recognizes scenes that may combine 2D and 3D constructors', () => {
+  assert.equal(
+    mayContainMixedGeometry('cylinder(h=5, r1=4, r2=0); rotate([0,90,0]) circle(50);'),
+    true
+  );
+  assert.equal(mayContainMixedGeometry('linear_extrude(5) circle(10);'), true);
+  assert.equal(mayContainMixedGeometry('cube(10); sphere(5);'), false);
+  assert.equal(mayContainMixedGeometry('circle(10); square(5);'), false);
+});
+
+test('mixed-geometry hint ignores constructors in comments and strings', () => {
+  assert.equal(mayContainMixedGeometry('cube(10); // circle(50);'), false);
+  assert.equal(mayContainMixedGeometry('text("cylinder(20)");'), false);
+});
 
 test('splits independent normalized CSG roots without splitting nested operations', () => {
   const source = `

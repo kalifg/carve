@@ -144,6 +144,41 @@ test('hybrid preview keeps a Y-rotated 2D profile visible', async () => {
   assert.ok(flatResult.data.byteLength > 84);
 });
 
+test('hybrid preview recovers a rotated circle silently dropped beside a cone', async () => {
+  const code = `
+    $fn = 64;
+    flange_thickness = 5;
+    counter_sink_radius = 4;
+    cylinder(h = flange_thickness, r1 = counter_sink_radius, r2 = 0);
+    rotate([0, 90, 0]) circle(50);
+  `;
+  const stlResult = await render(code, 'binstl');
+
+  assert.equal(stlResult.success, true, stlResult.stderr);
+  assert.doesNotMatch(stlResult.stderr, /Mixing 2D and 3D objects is not supported/i);
+
+  const csgResult = await render(code, 'csg');
+  assert.equal(csgResult.success, true, csgResult.stderr);
+  const roots = splitTopLevelCsg(new TextDecoder().decode(csgResult.data));
+  assert.equal(roots.length, 2);
+
+  const solidResult = await render(roots[0], 'binstl');
+  const collapsedProbe = await render(roots[1], 'binstl');
+  const flatResult = await render(wrap2dForPreview(roots[1]), 'binstl');
+  assert.equal(solidResult.success, true, solidResult.stderr);
+  assert.equal(collapsedProbe.success, false);
+  assert.match(collapsedProbe.stderr, /top level object is empty/i);
+  assert.equal(flatResult.success, true, flatResult.stderr);
+
+  const bounds = binaryStlBounds(flatResult.data);
+  assert.ok(Math.abs(bounds.minX) < 1e-4, JSON.stringify(bounds));
+  assert.ok(Math.abs(bounds.maxX - 0.01) < 1e-4, JSON.stringify(bounds));
+  assert.ok(bounds.minY <= -49.9, JSON.stringify(bounds));
+  assert.ok(bounds.maxY >= 49.9, JSON.stringify(bounds));
+  assert.ok(bounds.minZ <= -49.9, JSON.stringify(bounds));
+  assert.ok(bounds.maxZ >= 49.9, JSON.stringify(bounds));
+});
+
 test('hybrid preview applies a 2D profile Z translation after preview extrusion', async () => {
   const code = 'translate([0, 0, 15]) circle(10); translate([25, 0, 0]) cube(10);';
   const csgResult = await render(code, 'csg');

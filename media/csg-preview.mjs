@@ -1,6 +1,59 @@
 // Utilities for turning OpenSCAD's normalized CSG export into independent
 // top-level preview branches. Kept browser-independent for direct unit tests.
 
+export function mayContainMixedGeometry(source) {
+  const code = stripCommentsAndStrings(source);
+  const has2d = /\b(?:circle|square|polygon|text|offset|projection)\s*\(/.test(code);
+  const has3d = /\b(?:cube|sphere|cylinder|polyhedron|linear_extrude|rotate_extrude|surface)\s*\(/.test(code);
+  const hasDimensionDependentImport = /\bimport\s*\(/.test(code);
+  return (has2d || hasDimensionDependentImport) && (has3d || hasDimensionDependentImport);
+}
+
+function stripCommentsAndStrings(source) {
+  let result = '';
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (char === '\n') {
+        lineComment = false;
+        result += '\n';
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (char === '*' && next === '/') {
+        blockComment = false;
+        index++;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '/' && next === '/') {
+      lineComment = true;
+      index++;
+    } else if (char === '/' && next === '*') {
+      blockComment = true;
+      index++;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
 export function splitTopLevelCsg(source) {
   const roots = [];
   let start = 0;

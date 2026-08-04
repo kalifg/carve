@@ -6,7 +6,11 @@ import OpenSCAD from 'openscad';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { splitTopLevelCsg, wrap2dForPreview } from './csg-preview.mjs';
+import {
+  mayContainMixedGeometry,
+  splitTopLevelCsg,
+  wrap2dForPreview
+} from './csg-preview.mjs';
 
 // Keep the preview-format selection in this entry module. VS Code webviews
 // resolve the import map before executing any module code, so an unresolved
@@ -260,7 +264,17 @@ async function runPreview(code) {
   if (isMixedDimensions(result.stderr)) {
     return runHybridPreview(code);
   }
-  if (result.success) return { ...result, format };
+  if (result.success) {
+    // Some OpenSCAD builds successfully export only the 3D portion when a
+    // transformed 2D root collapses edge-on (for example rotate([0,90,0])
+    // circle(...)). In that case there is no mixed-dimension warning to
+    // trigger the normal fallback, so proactively inspect likely mixed files.
+    if (mayContainMixedGeometry(code)) {
+      const hybridResult = await runHybridPreview(code);
+      if (hybridResult.success || hybridResult.mixedDimensions) return hybridResult;
+    }
+    return { ...result, format };
+  }
   if (isEmptyTopLevel(result.stderr)) {
     return { ...result, success: true, empty: true, stderr: '', format };
   }
@@ -275,7 +289,13 @@ async function runPreview(code) {
   if (isEmptyTopLevel(fallbackResult.stderr)) {
     return { ...fallbackResult, success: true, empty: true, stderr: '', format: fallbackFormat };
   }
-  if (fallbackResult.success) preferredPreviewFormat = fallbackFormat;
+  if (fallbackResult.success) {
+    preferredPreviewFormat = fallbackFormat;
+    if (mayContainMixedGeometry(code)) {
+      const hybridResult = await runHybridPreview(code);
+      if (hybridResult.success || hybridResult.mixedDimensions) return hybridResult;
+    }
+  }
   return { ...fallbackResult, format: fallbackFormat };
 }
 
