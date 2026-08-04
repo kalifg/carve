@@ -50,6 +50,14 @@ test('the 2D viewer supports fit, pointer-centered zoom, pan, and axes', () => {
   assert.match(extensionSource, /id="fit2d"/);
 });
 
+test('the 3D viewer preserves its viewpoint between renders and supports refitting', () => {
+  assert.match(viewerSource, /let has3dViewpoint = false/);
+  assert.equal(viewerSource.match(/if \(!has3dViewpoint\) fit3dPreview\(\)/g)?.length, 2);
+  assert.match(viewerSource, /fit3dButton\.addEventListener\('click', fit3dPreview\)/);
+  assert.match(viewerSource, /canvas\.addEventListener\('dblclick', fit3dPreview\)/);
+  assert.match(extensionSource, /id="fit3d"/);
+});
+
 test('2D axis measurements adapt to zoom and preserve OpenSCAD Y direction', () => {
   assert.match(viewerSource, /function formatAxisValue\(/);
   assert.match(viewerSource, /formatAxisValue\(value, step\)/);

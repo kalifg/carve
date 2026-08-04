@@ -223,23 +223,26 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
   #viewer2dGrid { width: 100%; height: 100%; pointer-events: none; }
   #svgPreview { display: block; max-width: none; max-height: none;
                 transform-origin: 0 0; pointer-events: none; user-select: none; }
-  #fit2d { position: absolute; z-index: 3; right: 10px; bottom: 10px;
+  .fit-button { position: absolute; z-index: 3; right: 10px; bottom: 10px;
            border: 1px solid var(--vscode-button-border, #999);
            border-radius: 4px; padding: 4px 9px;
            color: var(--vscode-button-foreground, #fff);
            background: var(--vscode-button-background, #555); cursor: pointer; }
-  #fit2d:hover { background: var(--vscode-button-hoverBackground, #666); }
+  .fit-button:hover { background: var(--vscode-button-hoverBackground, #666); }
   [hidden] { display: none !important; }
   #status.error { background: rgba(150,30,30,0.75); }
 </style>
 </head>
 <body>
 <canvas id="viewer"></canvas>
+<button id="fit3d" class="fit-button" type="button" hidden
+        title="Zoom to fit (double-click the canvas)">Fit</button>
 <div id="emptyPreview" hidden>No top-level geometry to preview</div>
 <div id="viewer2d" hidden>
   <canvas id="viewer2dGrid"></canvas>
   <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />
-  <button id="fit2d" type="button" title="Zoom to fit (double-click the canvas)">Fit</button>
+  <button id="fit2d" class="fit-button" type="button"
+          title="Zoom to fit (double-click the canvas)">Fit</button>
 </div>
 <div id="status">Loading OpenSCAD WebAssembly\u2026</div>
 <script type="importmap" nonce="${nonce}">

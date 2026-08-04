@@ -56,6 +56,7 @@ const viewer2d = document.getElementById('viewer2d');
 const emptyPreview = document.getElementById('emptyPreview');
 const viewer2dGrid = document.getElementById('viewer2dGrid');
 const svgPreview = document.getElementById('svgPreview');
+const fit3dButton = document.getElementById('fit3d');
 const fit2dButton = document.getElementById('fit2d');
 
 const setStatus = (text, isError = false) => {
@@ -139,6 +140,7 @@ let view2dOffsetY = 0;
 let view2dIsFitted = true;
 let view2dWidth = 0;
 let view2dHeight = 0;
+let has3dViewpoint = false;
 const material3d = new THREE.MeshStandardMaterial({
   color: 0xf9b233, metalness: 0.1, roughness: 0.6, flatShading: true
 });
@@ -344,6 +346,7 @@ function showPlaceholder(message) {
   clear3dPreview();
   clear2dPreview();
   canvas.hidden = true;
+  fit3dButton.hidden = true;
   viewer2d.hidden = true;
   emptyPreview.textContent = message;
   emptyPreview.hidden = false;
@@ -357,12 +360,13 @@ function show3d(stl) {
   emptyPreview.hidden = true;
   viewer2d.hidden = true;
   canvas.hidden = false;
+  fit3dButton.hidden = false;
   clear2dPreview();
 
   clear3dPreview();
   const geom = parseStl(stl);
   previewGroup.add(new THREE.Mesh(geom, material3d));
-  fit3dPreview();
+  if (!has3dViewpoint) fit3dPreview();
   return geom.attributes.position.count / 3;
 }
 
@@ -403,12 +407,17 @@ function fit3dPreview() {
   camera.updateProjectionMatrix();
   controls.target.copy(center);
   controls.update();
+  has3dViewpoint = true;
 }
+
+fit3dButton.addEventListener('click', fit3dPreview);
+canvas.addEventListener('dblclick', fit3dPreview);
 
 function showHybrid(parts) {
   emptyPreview.hidden = true;
   viewer2d.hidden = true;
   canvas.hidden = false;
+  fit3dButton.hidden = false;
   clear2dPreview();
   clear3dPreview();
 
@@ -423,7 +432,7 @@ function showHybrid(parts) {
     if (part.dimension === 2) twoDimensionalParts++;
     else threeDimensionalParts++;
   }
-  fit3dPreview();
+  if (!has3dViewpoint) fit3dPreview();
   return { triangles, twoDimensionalParts, threeDimensionalParts };
 }
 
@@ -668,6 +677,7 @@ fit2dButton.addEventListener('click', fit2d);
 function show2d(svg) {
   emptyPreview.hidden = true;
   canvas.hidden = true;
+  fit3dButton.hidden = true;
   viewer2d.hidden = false;
   clear3dPreview();
 
