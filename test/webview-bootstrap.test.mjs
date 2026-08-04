@@ -76,8 +76,17 @@ test('mixed 2D and 3D geometry is detected before a partial preview is shown', (
 test('independent mixed roots use a combined hybrid preview', () => {
   assert.match(viewerSource, /mayContainMixedGeometry\(code\)/);
   assert.match(viewerSource, /function runHybridPreview\(/);
-  assert.match(viewerSource, /splitTopLevelCsg\(/);
+  assert.match(viewerSource, /splitCsgForPreview\(/);
   assert.match(viewerSource, /wrap2dForPreview\(/);
   assert.match(viewerSource, /function showHybrid\(/);
   assert.match(viewerSource, /Hybrid 2D \+ 3D/);
+});
+
+test('evaluated OpenSCAD colors become per-part Three.js materials', () => {
+  assert.match(viewerSource, /mayContainColor\(code\)/);
+  assert.match(viewerSource, /splitCsgForPreview\(/);
+  assert.match(viewerSource, /function materialForPart\(/);
+  assert.match(viewerSource, /material\.color\.setRGB\(r, g, b, THREE\.SRGBColorSpace\)/);
+  assert.match(viewerSource, /material\.opacity = opacity/);
+  assert.match(viewerSource, /material\.depthWrite = opacity >= 1/);
 });

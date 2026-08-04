@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { splitTopLevelCsg, wrap2dForPreview } from '../media/csg-preview.mjs';
+import {
+  splitCsgForPreview,
+  splitTopLevelCsg,
+  wrap2dForPreview
+} from '../media/csg-preview.mjs';
 
 const mediaUrl = new URL('../media/', import.meta.url);
 const loaderSource = await readFile(new URL('openscad.js', mediaUrl), 'utf8');
@@ -198,4 +202,28 @@ test('bundled OpenSCAD WASM still exports 3D geometry as binary STL', async () =
 
   assert.equal(result.success, true, result.stderr);
   assert.ok(result.data.byteLength > 84);
+});
+
+test('normalized CSG preserves evaluated colors through nested groups and transforms', async () => {
+  const code = `
+    group() {
+      cylinder(h = 5, r = 10);
+      translate([20, 0, 0]) {
+        cylinder(h = 5, r = 2);
+        color("red", 0.4) translate([0, 0, 15]) cylinder(h = 5, r1 = 4, r2 = 0);
+      }
+    }
+  `;
+  const csgResult = await render(code, 'csg');
+
+  assert.equal(csgResult.success, true, csgResult.stderr);
+  const parts = splitCsgForPreview(new TextDecoder().decode(csgResult.data));
+  assert.equal(parts.length, 3);
+  assert.equal(parts.filter((part) => part.color).length, 1);
+  assert.deepEqual(parts.find((part) => part.color).color, { r: 1, g: 0, b: 0, a: 0.4 });
+
+  for (const part of parts) {
+    const stlResult = await render(part.source, 'binstl');
+    assert.equal(stlResult.success, true, stlResult.stderr);
+  }
 });

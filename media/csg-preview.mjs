@@ -9,6 +9,10 @@ export function mayContainMixedGeometry(source) {
   return (has2d || hasDimensionDependentImport) && (has3d || hasDimensionDependentImport);
 }
 
+export function mayContainColor(source) {
+  return /\bcolor\s*\(/.test(stripCommentsAndStrings(source));
+}
+
 function stripCommentsAndStrings(source) {
   let result = '';
   let quote = null;
@@ -131,6 +135,41 @@ export function splitTopLevelCsg(source) {
   return roots;
 }
 
+export function splitCsgForPreview(source) {
+  return splitTopLevelCsg(source).flatMap((root) => splitPreviewBranch(root));
+}
+
+function splitPreviewBranch(root, inheritedColor) {
+  const wrapper = peelTransparentWrapper(root);
+  if (!wrapper) return [{ source: root.trim(), color: inheritedColor }];
+
+  const color = wrapper.name === 'color'
+    ? parseNormalizedColor(wrapper.header) ?? inheritedColor
+    : inheritedColor;
+  const children = splitTopLevelCsg(wrapper.body);
+  return children.flatMap((child) =>
+    splitPreviewBranch(child, color).map((part) => ({
+      ...part,
+      source: `${wrapper.header}\n${part.source}\n}`
+    }))
+  );
+}
+
+function parseNormalizedColor(header) {
+  const number = '([-+]?(?:\\d*\\.)?\\d+(?:[eE][-+]?\\d+)?)';
+  const match = header.match(new RegExp(
+    `\\bcolor\\s*\\(\\s*\\[\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}` +
+    `(?:\\s*,\\s*${number})?\\s*\\]`
+  ));
+  if (!match) return undefined;
+  return {
+    r: Number(match[1]),
+    g: Number(match[2]),
+    b: Number(match[3]),
+    a: match[4] === undefined ? 1 : Number(match[4])
+  };
+}
+
 export function wrap2dForPreview(root, thickness = 0.01) {
   if (!root.trim()) throw new Error('Cannot preview an empty CSG branch.');
   if (!Number.isFinite(thickness) || thickness <= 0) {
@@ -195,6 +234,7 @@ function peelTransparentWrapper(root) {
       if (braceDepth === 0) {
         if (root.slice(index + 1).trim()) return undefined;
         return {
+          name: match[2],
           header: root.slice(0, openingBrace + 1).trimEnd(),
           body: root.slice(openingBrace + 1, index)
         };

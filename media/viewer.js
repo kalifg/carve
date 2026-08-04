@@ -7,8 +7,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import {
+  mayContainColor,
   mayContainMixedGeometry,
-  splitTopLevelCsg,
+  splitCsgForPreview,
   wrap2dForPreview
 } from './csg-preview.mjs';
 
@@ -19,6 +20,7 @@ const PREVIEW_3D_FORMAT = 'binstl';
 const PREVIEW_2D_FORMAT = 'svg';
 const PREVIEW_CSG_FORMAT = 'csg';
 const PREVIEW_HYBRID_FORMAT = 'hybrid';
+const PREVIEW_SCENE_FORMAT = 'scene';
 const HYBRID_2D_THICKNESS = 0.01;
 
 function cleanStderr(stderr) {
@@ -199,24 +201,24 @@ async function runOpenscad(code, format) {
 }
 
 let preferredPreviewFormat = PREVIEW_3D_FORMAT;
-async function runHybridPreview(code) {
+async function runCsgScenePreview(code, requireMixedDimensions = false) {
   const csgResult = await runOpenscad(code, PREVIEW_CSG_FORMAT);
   if (!csgResult.success) {
-    return { ...csgResult, format: PREVIEW_HYBRID_FORMAT };
+    return { ...csgResult, format: PREVIEW_SCENE_FORMAT };
   }
 
-  let roots;
+  let previewBranches;
   try {
-    roots = splitTopLevelCsg(new TextDecoder().decode(csgResult.data));
+    previewBranches = splitCsgForPreview(new TextDecoder().decode(csgResult.data));
   } catch (error) {
-    return { success: false, stderr: String(error), format: PREVIEW_HYBRID_FORMAT };
+    return { success: false, stderr: String(error), format: PREVIEW_SCENE_FORMAT };
   }
 
   const parts = [];
-  for (const root of roots) {
-    const stlResult = await runOpenscad(root, PREVIEW_3D_FORMAT);
+  for (const branch of previewBranches) {
+    const stlResult = await runOpenscad(branch.source, PREVIEW_3D_FORMAT);
     if (stlResult.success) {
-      parts.push({ dimension: 3, data: stlResult.data });
+      parts.push({ dimension: 3, data: stlResult.data, color: branch.color });
       continue;
     }
     if (isMixedDimensions(stlResult.stderr)) {
@@ -233,29 +235,53 @@ async function runHybridPreview(code) {
       };
     }
     if (!isEmptyTopLevel(stlResult.stderr) && !/not a 3D object/i.test(stlResult.stderr)) {
-      return { ...stlResult, format: PREVIEW_HYBRID_FORMAT };
+      return { ...stlResult, format: PREVIEW_SCENE_FORMAT };
     }
 
     const flatResult = await runOpenscad(
-      wrap2dForPreview(root, HYBRID_2D_THICKNESS),
+      wrap2dForPreview(branch.source, HYBRID_2D_THICKNESS),
       PREVIEW_3D_FORMAT
     );
     if (!flatResult.success) {
       if (isEmptyTopLevel(flatResult.stderr)) continue;
-      return { ...flatResult, format: PREVIEW_HYBRID_FORMAT };
+      return { ...flatResult, format: PREVIEW_SCENE_FORMAT };
     }
-    parts.push({ dimension: 2, data: flatResult.data });
+    parts.push({ dimension: 2, data: flatResult.data, color: branch.color });
   }
 
   const dimensions = new Set(parts.map((part) => part.dimension));
-  if (!dimensions.has(2) || !dimensions.has(3)) {
+  const isHybrid = dimensions.has(2) && dimensions.has(3);
+  if (requireMixedDimensions && !isHybrid) {
     return {
       success: false,
       stderr: 'OpenSCAD reported mixed geometry, but Carve could not isolate both dimensions.',
       format: PREVIEW_HYBRID_FORMAT
     };
   }
-  return { success: true, parts, stderr: '', format: PREVIEW_HYBRID_FORMAT };
+  return {
+    success: true,
+    parts,
+    hasColor: parts.some((part) => part.color),
+    stderr: '',
+    format: isHybrid ? PREVIEW_HYBRID_FORMAT : PREVIEW_SCENE_FORMAT
+  };
+}
+
+function runHybridPreview(code) {
+  return runCsgScenePreview(code, true);
+}
+
+async function enhancedScenePreview(code, format) {
+  const mixedHint = mayContainMixedGeometry(code);
+  const colorHint = format === PREVIEW_3D_FORMAT && mayContainColor(code);
+  if (!mixedHint && !colorHint) return undefined;
+
+  const sceneResult = await runCsgScenePreview(code);
+  if (sceneResult.mixedDimensions) return sceneResult;
+  if (!sceneResult.success) return undefined;
+  if (sceneResult.format === PREVIEW_HYBRID_FORMAT) return sceneResult;
+  if (colorHint && sceneResult.hasColor) return sceneResult;
+  return undefined;
 }
 
 async function runPreview(code) {
@@ -269,10 +295,8 @@ async function runPreview(code) {
     // transformed 2D root collapses edge-on (for example rotate([0,90,0])
     // circle(...)). In that case there is no mixed-dimension warning to
     // trigger the normal fallback, so proactively inspect likely mixed files.
-    if (mayContainMixedGeometry(code)) {
-      const hybridResult = await runHybridPreview(code);
-      if (hybridResult.success || hybridResult.mixedDimensions) return hybridResult;
-    }
+    const sceneResult = await enhancedScenePreview(code, format);
+    if (sceneResult) return sceneResult;
     return { ...result, format };
   }
   if (isEmptyTopLevel(result.stderr)) {
@@ -291,10 +315,8 @@ async function runPreview(code) {
   }
   if (fallbackResult.success) {
     preferredPreviewFormat = fallbackFormat;
-    if (mayContainMixedGeometry(code)) {
-      const hybridResult = await runHybridPreview(code);
-      if (hybridResult.success || hybridResult.mixedDimensions) return hybridResult;
-    }
+    const sceneResult = await enhancedScenePreview(code, fallbackFormat);
+    if (sceneResult) return sceneResult;
   }
   return { ...fallbackResult, format: fallbackFormat };
 }
@@ -303,6 +325,9 @@ function clear3dPreview() {
   for (const child of [...previewGroup.children]) {
     previewGroup.remove(child);
     child.geometry?.dispose();
+    if (child.material !== material2d && child.material !== material3d) {
+      child.material?.dispose();
+    }
   }
 }
 
@@ -341,6 +366,22 @@ function show3d(stl) {
   return geom.attributes.position.count / 3;
 }
 
+function materialForPart(part) {
+  const baseMaterial = part.dimension === 2 ? material2d : material3d;
+  if (!part.color) return baseMaterial;
+
+  const material = baseMaterial.clone();
+  const r = THREE.MathUtils.clamp(part.color.r, 0, 1);
+  const g = THREE.MathUtils.clamp(part.color.g, 0, 1);
+  const b = THREE.MathUtils.clamp(part.color.b, 0, 1);
+  const opacity = THREE.MathUtils.clamp(part.color.a, 0, 1);
+  material.color.setRGB(r, g, b, THREE.SRGBColorSpace);
+  material.opacity = opacity;
+  material.transparent = opacity < 1;
+  material.depthWrite = opacity >= 1;
+  return material;
+}
+
 function parseStl(stl) {
   const geom = new STLLoader().parse(
     stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength)
@@ -376,7 +417,7 @@ function showHybrid(parts) {
   let threeDimensionalParts = 0;
   for (const part of parts) {
     const geom = parseStl(part.data);
-    const partMaterial = part.dimension === 2 ? material2d : material3d;
+    const partMaterial = materialForPart(part);
     previewGroup.add(new THREE.Mesh(geom, partMaterial));
     triangles += geom.attributes.position.count / 3;
     if (part.dimension === 2) twoDimensionalParts++;
@@ -663,6 +704,13 @@ async function renderToScene(code) {
       setStatus(
         `OK \u00b7 ${ms} ms \u00b7 Hybrid 2D + 3D \u00b7 ` +
         `${summary.twoDimensionalParts} flat + ${summary.threeDimensionalParts} solid \u00b7 ` +
+        `${summary.triangles.toLocaleString()} triangles`
+      );
+    } else if (result.format === PREVIEW_SCENE_FORMAT) {
+      const summary = showHybrid(result.parts);
+      setStatus(
+        `OK \u00b7 ${ms} ms \u00b7 3D color scene \u00b7 ` +
+        `${summary.threeDimensionalParts} parts \u00b7 ` +
         `${summary.triangles.toLocaleString()} triangles`
       );
     } else if (result.format === PREVIEW_2D_FORMAT) {

@@ -2,10 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  mayContainColor,
   mayContainMixedGeometry,
+  splitCsgForPreview,
   splitTopLevelCsg,
   wrap2dForPreview
 } from '../media/csg-preview.mjs';
+
+test('recognizes color calls while ignoring comments and strings', () => {
+  assert.equal(mayContainColor('color("red") cube(10);'), true);
+  assert.equal(mayContainColor('cube(10); // color("red")'), false);
+  assert.equal(mayContainColor('text("color(red)");'), false);
+});
 
 test('recognizes scenes that may combine 2D and 3D constructors', () => {
   assert.equal(
@@ -92,4 +100,24 @@ test('preserves transparent group and color wrappers around the preview extrusio
 
   assert.match(wrapped, /^#color/);
   assert.ok(wrapped.indexOf('group') < wrapped.indexOf('linear_extrude'));
+});
+
+test('splits presentation-safe wrappers and carries evaluated colors', () => {
+  const source = `
+    group() {
+      cylinder(h = 5, r = 3);
+      multmatrix([[1, 0, 0, 20], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) {
+        color([1, 0.25, 0.5, 0.4]) { cylinder(h = 5, r = 2); }
+      }
+    }
+  `;
+
+  const parts = splitCsgForPreview(source);
+
+  assert.equal(parts.length, 2);
+  assert.equal(parts[0].color, undefined);
+  assert.deepEqual(parts[1].color, { r: 1, g: 0.25, b: 0.5, a: 0.4 });
+  assert.match(parts[1].source, /^group\(\)/);
+  assert.match(parts[1].source, /multmatrix/);
+  assert.match(parts[1].source, /color\(\[1, 0\.25, 0\.5, 0\.4\]\)/);
 });
