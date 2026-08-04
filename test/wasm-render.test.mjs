@@ -45,6 +45,31 @@ async function render(code, format) {
   };
 }
 
+function binaryStlBounds(data) {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const facets = view.getUint32(80, true);
+  const bounds = {
+    minX: Infinity, minY: Infinity, minZ: Infinity,
+    maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity
+  };
+  for (let facet = 0; facet < facets; facet++) {
+    const facetOffset = 84 + facet * 50;
+    for (let vertex = 0; vertex < 3; vertex++) {
+      const vertexOffset = facetOffset + 12 + vertex * 12;
+      const x = view.getFloat32(vertexOffset, true);
+      const y = view.getFloat32(vertexOffset + 4, true);
+      const z = view.getFloat32(vertexOffset + 8, true);
+      bounds.minX = Math.min(bounds.minX, x);
+      bounds.minY = Math.min(bounds.minY, y);
+      bounds.minZ = Math.min(bounds.minZ, z);
+      bounds.maxX = Math.max(bounds.maxX, x);
+      bounds.maxY = Math.max(bounds.maxY, y);
+      bounds.maxZ = Math.max(bounds.maxZ, z);
+    }
+  }
+  return bounds;
+}
+
 test('bundled OpenSCAD WASM exports 2D geometry as SVG', async () => {
   const result = await render('difference() { circle(25); circle(12.5); }', 'svg');
 
@@ -100,6 +125,37 @@ test('bundled OpenSCAD WASM can isolate and preview independent mixed roots', as
   const flatResult = await render(wrap2dForPreview(roots[0]), 'binstl');
   assert.equal(flatResult.success, true, flatResult.stderr);
   assert.ok(flatResult.data.byteLength > 84);
+});
+
+test('hybrid preview keeps a Y-rotated 2D profile visible', async () => {
+  const code = 'rotate([0, 90, 0]) circle(10); translate([25, 0, 0]) cube(10);';
+  const csgResult = await render(code, 'csg');
+
+  assert.equal(csgResult.success, true, csgResult.stderr);
+  const roots = splitTopLevelCsg(new TextDecoder().decode(csgResult.data));
+  assert.equal(roots.length, 2);
+
+  const collapsedProbe = await render(roots[0], 'binstl');
+  assert.equal(collapsedProbe.success, false);
+  assert.match(collapsedProbe.stderr, /top level object is empty/i);
+
+  const flatResult = await render(wrap2dForPreview(roots[0]), 'binstl');
+  assert.equal(flatResult.success, true, flatResult.stderr);
+  assert.ok(flatResult.data.byteLength > 84);
+});
+
+test('hybrid preview applies a 2D profile Z translation after preview extrusion', async () => {
+  const code = 'translate([0, 0, 15]) circle(10); translate([25, 0, 0]) cube(10);';
+  const csgResult = await render(code, 'csg');
+
+  assert.equal(csgResult.success, true, csgResult.stderr);
+  const roots = splitTopLevelCsg(new TextDecoder().decode(csgResult.data));
+  const flatResult = await render(wrap2dForPreview(roots[0]), 'binstl');
+
+  assert.equal(flatResult.success, true, flatResult.stderr);
+  const bounds = binaryStlBounds(flatResult.data);
+  assert.ok(Math.abs(bounds.minZ - 15) < 1e-4, JSON.stringify(bounds));
+  assert.ok(Math.abs(bounds.maxZ - 15.01) < 1e-4, JSON.stringify(bounds));
 });
 
 test('bundled OpenSCAD WASM still exports 3D geometry as binary STL', async () => {

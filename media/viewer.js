@@ -215,7 +215,6 @@ async function runHybridPreview(code) {
       parts.push({ dimension: 3, data: stlResult.data });
       continue;
     }
-    if (isEmptyTopLevel(stlResult.stderr)) continue;
     if (isMixedDimensions(stlResult.stderr)) {
       return {
         success: false,
@@ -229,7 +228,7 @@ async function runHybridPreview(code) {
         format: PREVIEW_HYBRID_FORMAT
       };
     }
-    if (!/not a 3D object/i.test(stlResult.stderr)) {
+    if (!isEmptyTopLevel(stlResult.stderr) && !/not a 3D object/i.test(stlResult.stderr)) {
       return { ...stlResult, format: PREVIEW_HYBRID_FORMAT };
     }
 
@@ -238,6 +237,7 @@ async function runHybridPreview(code) {
       PREVIEW_3D_FORMAT
     );
     if (!flatResult.success) {
+      if (isEmptyTopLevel(flatResult.stderr)) continue;
       return { ...flatResult, format: PREVIEW_HYBRID_FORMAT };
     }
     parts.push({ dimension: 2, data: flatResult.data });

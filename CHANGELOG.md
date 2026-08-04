@@ -7,6 +7,7 @@
 - Add adaptive numeric tick measurements along the 2D axes
 - Treat empty top-level geometry as a normal empty preview and suppress benign localization startup noise
 - Preview independent top-level 2D and 3D branches together while rejecting incompatible mixed operations within one branch
+- Preserve out-of-plane rotations and Z translations on hybrid 2D profiles
 
 ## 0.1.5 — 2026-05-16
 - Corrected publisher ID to `carve3d` (first marketplace release)

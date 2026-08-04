@@ -48,3 +48,29 @@ test('wraps a 2D CSG branch in a shallow preview extrusion', () => {
   assert.match(wrapped, /^linear_extrude\(height = 0\.02/);
   assert.match(wrapped, /difference\(\)/);
 });
+
+test('extrudes before applying an outer transform to preserve a rotated sketch plane', () => {
+  const root = `
+    multmatrix([[0, 0, 1, 0], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]]) {
+      circle(r = 10);
+    }
+  `;
+  const wrapped = wrap2dForPreview(root);
+
+  assert.ok(wrapped.indexOf('multmatrix') < wrapped.indexOf('linear_extrude'));
+  assert.ok(wrapped.indexOf('linear_extrude') < wrapped.indexOf('circle'));
+});
+
+test('preserves transparent group and color wrappers around the preview extrusion', () => {
+  const root = `
+    #color([1, 0, 0, 1]) {
+      group() {
+        circle(r = 10);
+      }
+    }
+  `;
+  const wrapped = wrap2dForPreview(root);
+
+  assert.match(wrapped, /^#color/);
+  assert.ok(wrapped.indexOf('group') < wrapped.indexOf('linear_extrude'));
+});

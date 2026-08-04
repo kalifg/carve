@@ -83,5 +83,70 @@ export function wrap2dForPreview(root, thickness = 0.01) {
   if (!Number.isFinite(thickness) || thickness <= 0) {
     throw new Error('The 2D preview thickness must be positive.');
   }
+  return wrap2dBranch(root.trim(), thickness);
+}
+
+function wrap2dBranch(root, thickness) {
+  const wrapper = peelTransparentWrapper(root);
+  if (wrapper) {
+    const children = splitTopLevelCsg(wrapper.body);
+    const wrappedChildren = children
+      .map((child) => wrap2dBranch(child, thickness))
+      .join('\n');
+    return `${wrapper.header}\n${wrappedChildren}\n}`;
+  }
   return `linear_extrude(height = ${thickness}, center = false, convexity = 10) {\n${root}\n}`;
+}
+
+function peelTransparentWrapper(root) {
+  const match = root.match(/^([#%!*]\s*)?(multmatrix|color|group)\s*\(/);
+  if (!match) return undefined;
+
+  let quote = null;
+  let escaped = false;
+  let parenDepth = 0;
+  let openingBrace = -1;
+  for (let index = 0; index < root.length; index++) {
+    const char = root[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === '(') parenDepth++;
+    else if (char === ')') parenDepth--;
+    else if (char === '{' && parenDepth === 0) {
+      openingBrace = index;
+      break;
+    }
+  }
+  if (openingBrace < 0) return undefined;
+
+  let braceDepth = 0;
+  quote = null;
+  escaped = false;
+  for (let index = openingBrace; index < root.length; index++) {
+    const char = root[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === '{') braceDepth++;
+    else if (char === '}') {
+      braceDepth--;
+      if (braceDepth === 0) {
+        if (root.slice(index + 1).trim()) return undefined;
+        return {
+          header: root.slice(0, openingBrace + 1).trimEnd(),
+          body: root.slice(openingBrace + 1, index)
+        };
+      }
+    }
+  }
+  return undefined;
 }
