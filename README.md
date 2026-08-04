@@ -12,6 +12,7 @@
 
 - 🔄 **Live preview** — open any `.scad` file, hit `Ctrl+K V`, and watch your model update as you type
 - 📐 **2D geometry** — previews top-level 2D models as SVG, automatically switching between 2D and 3D as you edit
+- 🧩 **Hybrid preview** — shows independent flat 2D profiles beside solid 3D geometry in one orbitable scene
 - 🔎 **2D navigation** — zoom to fit, wheel/pinch zoom, drag to pan, plus a coordinate grid and measured X/Y axes
 - 🧱 **Self-contained** — ships the full OpenSCAD engine as ~10 MB of WebAssembly, plus a Three.js mesh viewer
 - 🧭 **OrbitControls** — drag to orbit, scroll to zoom, right-click to pan

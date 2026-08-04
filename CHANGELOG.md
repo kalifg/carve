@@ -6,7 +6,7 @@
 - Add zoom-to-fit, wheel/pinch zoom, drag-to-pan, grid, and X/Y axes for 2D previews
 - Add adaptive numeric tick measurements along the 2D axes
 - Treat empty top-level geometry as a normal empty preview and suppress benign localization startup noise
-- Reject mixed 2D/3D models with actionable guidance instead of displaying a partial preview
+- Preview independent top-level 2D and 3D branches together while rejecting incompatible mixed operations within one branch
 
 ## 0.1.5 — 2026-05-16
 - Corrected publisher ID to `carve3d` (first marketplace release)

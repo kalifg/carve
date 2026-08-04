@@ -6,12 +6,16 @@ import OpenSCAD from 'openscad';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { splitTopLevelCsg, wrap2dForPreview } from './csg-preview.mjs';
 
 // Keep the preview-format selection in this entry module. VS Code webviews
 // resolve the import map before executing any module code, so an unresolved
 // helper import prevents even the WASM error handler from running.
 const PREVIEW_3D_FORMAT = 'binstl';
 const PREVIEW_2D_FORMAT = 'svg';
+const PREVIEW_CSG_FORMAT = 'csg';
+const PREVIEW_HYBRID_FORMAT = 'hybrid';
+const HYBRID_2D_THICKNESS = 0.01;
 
 function cleanStderr(stderr) {
   return String(stderr ?? '')
@@ -27,17 +31,6 @@ function isEmptyTopLevel(stderr) {
 
 function isMixedDimensions(stderr) {
   return /Mixing 2D and 3D objects is not supported/i.test(stderr);
-}
-
-function mixedDimensionsDiagnostic(stderr) {
-  return [
-    'Mixed 2D and 3D geometry cannot be previewed together.',
-    'OpenSCAD would omit part of the model from the preview.',
-    'Use linear_extrude() or rotate_extrude() to make the 2D geometry 3D,',
-    'or projection() to make the 3D geometry 2D.',
-    '',
-    stderr
-  ].join('\n');
 }
 
 function fallbackPreviewFormat(format, stderr) {
@@ -128,8 +121,10 @@ const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(1, 1, 1);
 scene.add(dir);
 scene.add(new THREE.GridHelper(100, 10, 0x444466, 0x333344));
+const previewGroup = new THREE.Group();
+previewGroup.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
+scene.add(previewGroup);
 
-let mesh = null;
 let svgObjectUrl = null;
 let svgBounds = null;
 let view2dScale = 1;
@@ -138,8 +133,18 @@ let view2dOffsetY = 0;
 let view2dIsFitted = true;
 let view2dWidth = 0;
 let view2dHeight = 0;
-const material = new THREE.MeshStandardMaterial({
+const material3d = new THREE.MeshStandardMaterial({
   color: 0xf9b233, metalness: 0.1, roughness: 0.6, flatShading: true
+});
+const material2d = new THREE.MeshStandardMaterial({
+  color: 0xffd166,
+  metalness: 0,
+  roughness: 0.75,
+  flatShading: true,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -1,
+  polygonOffsetUnits: -1
 });
 
 function resize() {
@@ -190,17 +195,70 @@ async function runOpenscad(code, format) {
 }
 
 let preferredPreviewFormat = PREVIEW_3D_FORMAT;
+async function runHybridPreview(code) {
+  const csgResult = await runOpenscad(code, PREVIEW_CSG_FORMAT);
+  if (!csgResult.success) {
+    return { ...csgResult, format: PREVIEW_HYBRID_FORMAT };
+  }
+
+  let roots;
+  try {
+    roots = splitTopLevelCsg(new TextDecoder().decode(csgResult.data));
+  } catch (error) {
+    return { success: false, stderr: String(error), format: PREVIEW_HYBRID_FORMAT };
+  }
+
+  const parts = [];
+  for (const root of roots) {
+    const stlResult = await runOpenscad(root, PREVIEW_3D_FORMAT);
+    if (stlResult.success) {
+      parts.push({ dimension: 3, data: stlResult.data });
+      continue;
+    }
+    if (isEmptyTopLevel(stlResult.stderr)) continue;
+    if (isMixedDimensions(stlResult.stderr)) {
+      return {
+        success: false,
+        mixedDimensions: true,
+        stderr: [
+          'A single top-level branch still mixes 2D and 3D operations.',
+          'Move the 2D profile and 3D model into independent top-level branches.',
+          '',
+          stlResult.stderr
+        ].join('\n'),
+        format: PREVIEW_HYBRID_FORMAT
+      };
+    }
+    if (!/not a 3D object/i.test(stlResult.stderr)) {
+      return { ...stlResult, format: PREVIEW_HYBRID_FORMAT };
+    }
+
+    const flatResult = await runOpenscad(
+      wrap2dForPreview(root, HYBRID_2D_THICKNESS),
+      PREVIEW_3D_FORMAT
+    );
+    if (!flatResult.success) {
+      return { ...flatResult, format: PREVIEW_HYBRID_FORMAT };
+    }
+    parts.push({ dimension: 2, data: flatResult.data });
+  }
+
+  const dimensions = new Set(parts.map((part) => part.dimension));
+  if (!dimensions.has(2) || !dimensions.has(3)) {
+    return {
+      success: false,
+      stderr: 'OpenSCAD reported mixed geometry, but Carve could not isolate both dimensions.',
+      format: PREVIEW_HYBRID_FORMAT
+    };
+  }
+  return { success: true, parts, stderr: '', format: PREVIEW_HYBRID_FORMAT };
+}
+
 async function runPreview(code) {
   const format = preferredPreviewFormat;
   const result = await runOpenscad(code, format);
   if (isMixedDimensions(result.stderr)) {
-    return {
-      ...result,
-      success: false,
-      mixedDimensions: true,
-      stderr: mixedDimensionsDiagnostic(result.stderr),
-      format
-    };
+    return runHybridPreview(code);
   }
   if (result.success) return { ...result, format };
   if (isEmptyTopLevel(result.stderr)) {
@@ -212,13 +270,7 @@ async function runPreview(code) {
 
   const fallbackResult = await runOpenscad(code, fallbackFormat);
   if (isMixedDimensions(fallbackResult.stderr)) {
-    return {
-      ...fallbackResult,
-      success: false,
-      mixedDimensions: true,
-      stderr: mixedDimensionsDiagnostic(fallbackResult.stderr),
-      format: fallbackFormat
-    };
+    return runHybridPreview(code);
   }
   if (isEmptyTopLevel(fallbackResult.stderr)) {
     return { ...fallbackResult, success: true, empty: true, stderr: '', format: fallbackFormat };
@@ -228,10 +280,10 @@ async function runPreview(code) {
 }
 
 function clear3dPreview() {
-  if (!mesh) return;
-  scene.remove(mesh);
-  mesh.geometry.dispose();
-  mesh = null;
+  for (const child of [...previewGroup.children]) {
+    previewGroup.remove(child);
+    child.geometry?.dispose();
+  }
 }
 
 function clear2dPreview() {
@@ -262,20 +314,56 @@ function show3d(stl) {
   canvas.hidden = false;
   clear2dPreview();
 
+  clear3dPreview();
+  const geom = parseStl(stl);
+  previewGroup.add(new THREE.Mesh(geom, material3d));
+  fit3dPreview();
+  return geom.attributes.position.count / 3;
+}
+
+function parseStl(stl) {
   const geom = new STLLoader().parse(
     stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength)
   );
   geom.computeVertexNormals();
-  clear3dPreview();
-  mesh = new THREE.Mesh(geom, material);
-  mesh.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
-  scene.add(mesh);
-  geom.computeBoundingSphere();
-  const r = Math.max(20, geom.boundingSphere.radius);
-  camera.position.set(r * 2, r * 2, r * 2);
-  controls.target.set(0, 0, 0);
+  return geom;
+}
+
+function fit3dPreview() {
+  const bounds = new THREE.Box3().setFromObject(previewGroup);
+  if (bounds.isEmpty()) return;
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const radius = Math.max(20, size.length() / 2);
+  const direction = new THREE.Vector3(1, 1, 1).normalize();
+  camera.position.copy(center).addScaledVector(direction, radius * 2.6);
+  camera.near = Math.max(0.01, radius / 1000);
+  camera.far = Math.max(10000, radius * 100);
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
   controls.update();
-  return geom.attributes.position.count / 3;
+}
+
+function showHybrid(parts) {
+  emptyPreview.hidden = true;
+  viewer2d.hidden = true;
+  canvas.hidden = false;
+  clear2dPreview();
+  clear3dPreview();
+
+  let triangles = 0;
+  let twoDimensionalParts = 0;
+  let threeDimensionalParts = 0;
+  for (const part of parts) {
+    const geom = parseStl(part.data);
+    const partMaterial = part.dimension === 2 ? material2d : material3d;
+    previewGroup.add(new THREE.Mesh(geom, partMaterial));
+    triangles += geom.attributes.position.count / 3;
+    if (part.dimension === 2) twoDimensionalParts++;
+    else threeDimensionalParts++;
+  }
+  fit3dPreview();
+  return { triangles, twoDimensionalParts, threeDimensionalParts };
 }
 
 function parseSvgBounds(svg) {
@@ -540,7 +628,7 @@ async function renderToScene(code) {
   const ms = (performance.now() - t0).toFixed(0);
   if (!result.success) {
     if (result.mixedDimensions) {
-      showPlaceholder('Mixed 2D and 3D geometry cannot be previewed together');
+      showPlaceholder('This branch mixes incompatible 2D and 3D operations');
     }
     setStatus(`Error (${ms} ms)\n${result.stderr || 'OpenSCAD produced no diagnostic output.'}`, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: result.stderr });
@@ -550,6 +638,13 @@ async function renderToScene(code) {
     if (result.empty) {
       showEmpty();
       setStatus(`Empty \u00b7 ${ms} ms \u00b7 no top-level geometry`);
+    } else if (result.format === PREVIEW_HYBRID_FORMAT) {
+      const summary = showHybrid(result.parts);
+      setStatus(
+        `OK \u00b7 ${ms} ms \u00b7 Hybrid 2D + 3D \u00b7 ` +
+        `${summary.twoDimensionalParts} flat + ${summary.threeDimensionalParts} solid \u00b7 ` +
+        `${summary.triangles.toLocaleString()} triangles`
+      );
     } else if (result.format === PREVIEW_2D_FORMAT) {
       show2d(result.data);
       setStatus(`OK \u00b7 ${ms} ms \u00b7 2D SVG \u00b7 ${result.data.byteLength.toLocaleString()} B`);

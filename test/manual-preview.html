@@ -31,13 +31,17 @@
   </div>
   <div id="status">Loading OpenSCAD WebAssembly…</div>
   <script>
-    const twoDimensionalFixture = `
+    const hybridFixture = `
       $fn = 32;
-      difference() {
-        circle(25);
-        circle(12.5);
-        translate([0, 15.375]) square([1.5, 7.06], center = true);
+      module profile() {
+        difference() {
+          circle(25);
+          circle(12.5);
+          translate([0, 15.375]) square([1.5, 7.06], center = true);
+        }
       }
+      translate([-40, 0]) profile();
+      translate([40, 0, 0]) linear_extrude(12) profile();
     `;
     let renderRequested = false;
     window.renderScad = (code) => window.postMessage({ type: 'render', code });
@@ -46,7 +50,7 @@
         window.lastCarveMessage = message;
         if (message.type === 'ready' && !renderRequested) {
           renderRequested = true;
-          queueMicrotask(() => window.renderScad(twoDimensionalFixture));
+          queueMicrotask(() => window.renderScad(hybridFixture));
         }
       }
     });

@@ -66,10 +66,17 @@ test('empty geometry is a neutral preview state and localization noise is filter
   assert.match(extensionSource, /id="emptyPreview"/);
 });
 
-test('mixed 2D and 3D geometry is rejected before a partial preview is shown', () => {
+test('mixed 2D and 3D geometry is detected before a partial preview is shown', () => {
   assert.match(viewerSource, /function isMixedDimensions\(/);
-  assert.match(viewerSource, /OpenSCAD would omit part of the model from the preview/);
   assert.match(viewerSource, /mixedDimensions: true/);
   assert.match(viewerSource, /function showPlaceholder\(/);
-  assert.match(viewerSource, /Mixed 2D and 3D geometry cannot be previewed together/);
+  assert.match(viewerSource, /incompatible 2D and 3D operations/);
+});
+
+test('independent mixed roots use a combined hybrid preview', () => {
+  assert.match(viewerSource, /function runHybridPreview\(/);
+  assert.match(viewerSource, /splitTopLevelCsg\(/);
+  assert.match(viewerSource, /wrap2dForPreview\(/);
+  assert.match(viewerSource, /function showHybrid\(/);
+  assert.match(viewerSource, /Hybrid 2D \+ 3D/);
 });
