@@ -12,6 +12,13 @@ import {
   splitCsgForPreview,
   wrap2dForPreview
 } from './csg-preview.mjs';
+import {
+  formatMeasuredValue,
+  measurementInterval,
+  measurementTickRange,
+  paddedMeasurementRange,
+  perspectiveWorldUnitsPerPixel
+} from './measurement-utils.mjs';
 
 // Keep the preview-format selection in this entry module. VS Code webviews
 // resolve the import map before executing any module code, so an unresolved
@@ -57,6 +64,7 @@ const emptyPreview = document.getElementById('emptyPreview');
 const viewer2dGrid = document.getElementById('viewer2dGrid');
 const svgPreview = document.getElementById('svgPreview');
 const fit3dButton = document.getElementById('fit3d');
+const axes3dButton = document.getElementById('axes3d');
 const fit2dButton = document.getElementById('fit2d');
 const consoleToggle = document.getElementById('consoleToggle');
 const compileConsole = document.getElementById('compileConsole');
@@ -150,10 +158,30 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 const dir = new THREE.DirectionalLight(0xffffff, 1.0);
 dir.position.set(1, 1, 1);
 scene.add(dir);
-scene.add(new THREE.GridHelper(100, 10, 0x444466, 0x333344));
 const previewGroup = new THREE.Group();
 previewGroup.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
 scene.add(previewGroup);
+const modelGroup = new THREE.Group();
+const measurementGroup = new THREE.Group();
+measurementGroup.name = 'OpenSCAD measurements';
+previewGroup.add(modelGroup, measurementGroup);
+
+const AXIS_COLORS = [0xe05252, 0x45b978, 0x4d83e6];
+const AXIS_NAMES = ['X', 'Y', 'Z'];
+const AXIS_DIRECTIONS = [
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(0, 1, 0),
+  new THREE.Vector3(0, 0, 1)
+];
+const LABEL_OFFSETS = [
+  new THREE.Vector3(0, -1, 0),
+  new THREE.Vector3(-1, 0, 0),
+  new THREE.Vector3(1, 0, 0)
+];
+let measurementBounds = null;
+let measurementKey = '';
+let measurementLabels = [];
+let axes3dVisible = true;
 
 let svgObjectUrl = null;
 let svgBounds = null;
@@ -184,6 +212,7 @@ function resize() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    refresh3dMeasurements();
   }
   resize2d();
 }
@@ -194,6 +223,182 @@ function loop() {
   renderer.render(scene, camera);
 }
 loop();
+
+function updateMeasurementBounds() {
+  const bounds = new THREE.Box3();
+  for (const child of modelGroup.children) {
+    if (!child.geometry) continue;
+    if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+    child.updateMatrix();
+    bounds.union(child.geometry.boundingBox.clone().applyMatrix4(child.matrix));
+  }
+  measurementBounds = bounds.isEmpty() ? null : bounds;
+  measurementKey = '';
+}
+
+function disposeMeasurementLayer() {
+  for (const child of [...measurementGroup.children]) {
+    measurementGroup.remove(child);
+    child.traverse((object) => {
+      object.geometry?.dispose();
+      if (object.material) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          material.map?.dispose();
+          material.dispose();
+        }
+      }
+    });
+  }
+  measurementLabels = [];
+}
+
+function createMeasurementLabel(text, color, anchor, offsetDirection, offsetPixels = 12, bold = false) {
+  const fontSize = 30;
+  const padding = 8;
+  const labelCanvas = document.createElement('canvas');
+  const context = labelCanvas.getContext('2d');
+  context.font = `${bold ? 'bold ' : ''}${fontSize}px sans-serif`;
+  labelCanvas.width = Math.ceil(context.measureText(text).width) + padding * 2;
+  labelCanvas.height = fontSize + padding * 2;
+  context.font = `${bold ? 'bold ' : ''}${fontSize}px sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.lineWidth = 4;
+  context.strokeStyle = 'rgba(35, 35, 48, 0.95)';
+  context.strokeText(text, labelCanvas.width / 2, labelCanvas.height / 2);
+  context.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+  context.fillText(text, labelCanvas.width / 2, labelCanvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(labelCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.userData.measurementLabel = {
+    anchor: anchor.clone(),
+    offsetDirection: offsetDirection.clone(),
+    offsetPixels,
+    widthPixels: labelCanvas.width * 0.42,
+    heightPixels: labelCanvas.height * 0.42
+  };
+  measurementGroup.add(sprite);
+  measurementLabels.push(sprite);
+}
+
+function pushColoredSegment(positions, colors, from, to, color) {
+  positions.push(from.x, from.y, from.z, to.x, to.y, to.z);
+  const threeColor = new THREE.Color(color);
+  colors.push(threeColor.r, threeColor.g, threeColor.b, threeColor.r, threeColor.g, threeColor.b);
+}
+
+function measurementRanges(bounds) {
+  const size = bounds.getSize(new THREE.Vector3());
+  let extent = Math.max(size.x, size.y, size.z);
+  if (!(extent > 0)) {
+    extent = Math.max(
+      Math.abs(bounds.min.x), Math.abs(bounds.max.x),
+      Math.abs(bounds.min.y), Math.abs(bounds.max.y),
+      Math.abs(bounds.min.z), Math.abs(bounds.max.z),
+      1
+    );
+  }
+  const padding = extent * 0.08;
+  return [
+    paddedMeasurementRange(bounds.min.x, bounds.max.x, padding),
+    paddedMeasurementRange(bounds.min.y, bounds.max.y, padding),
+    paddedMeasurementRange(bounds.min.z, bounds.max.z, padding)
+  ];
+}
+
+function rebuild3dMeasurements(force = false) {
+  if (!measurementBounds || !axes3dVisible) {
+    if (force || measurementGroup.children.length) disposeMeasurementLayer();
+    measurementKey = '';
+    return;
+  }
+  const unitsPerPixel = perspectiveWorldUnitsPerPixel(
+    camera.position.distanceTo(controls.target), camera.fov, canvas.clientHeight
+  );
+  if (!(unitsPerPixel > 0)) return;
+  const ranges = measurementRanges(measurementBounds);
+  let step = measurementInterval(unitsPerPixel, 80);
+  const largestSpan = Math.max(...ranges.map((range) => range.max - range.min));
+  while (largestSpan / step > 120) {
+    step = measurementInterval(step * 1.01, 1);
+  }
+  const key = JSON.stringify({ step, ranges });
+  if (!force && key === measurementKey) return;
+
+  disposeMeasurementLayer();
+  measurementKey = key;
+  const positions = [];
+  const colors = [];
+  const tickRadius = unitsPerPixel * 5;
+
+  for (let axis = 0; axis < 3; axis++) {
+    const direction = AXIS_DIRECTIONS[axis];
+    const range = ranges[axis];
+    const from = direction.clone().multiplyScalar(range.min);
+    const to = direction.clone().multiplyScalar(range.max);
+    pushColoredSegment(positions, colors, from, to, AXIS_COLORS[axis]);
+
+    const ticks = measurementTickRange(range.min, range.max, step);
+    for (let tick = ticks.first; tick <= ticks.last; tick++) {
+      const value = tick * step;
+      if (Math.abs(value) < step * 1e-9) continue;
+      const anchor = direction.clone().multiplyScalar(value);
+      const tickDirection = LABEL_OFFSETS[axis];
+      pushColoredSegment(
+        positions,
+        colors,
+        anchor.clone().addScaledVector(tickDirection, -tickRadius),
+        anchor.clone().addScaledVector(tickDirection, tickRadius),
+        AXIS_COLORS[axis]
+      );
+      createMeasurementLabel(
+        formatAxisValue(value, step), AXIS_COLORS[axis], anchor, LABEL_OFFSETS[axis]
+      );
+    }
+    const axisNameOffset = direction.clone().multiplyScalar(36)
+      .addScaledVector(LABEL_OFFSETS[axis], 32);
+    createMeasurementLabel(
+      AXIS_NAMES[axis], AXIS_COLORS[axis], to, axisNameOffset, 1, true
+    );
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.88 });
+  measurementGroup.add(new THREE.LineSegments(geometry, material));
+  createMeasurementLabel(
+    '0', 0xdddddd, new THREE.Vector3(), new THREE.Vector3(1, 1, 0).normalize(), 10
+  );
+}
+
+function refresh3dMeasurements() {
+  if (!axes3dVisible || !measurementBounds || canvas.hidden) return;
+  rebuild3dMeasurements();
+  const unitsPerPixel = perspectiveWorldUnitsPerPixel(
+    camera.position.distanceTo(controls.target), camera.fov, canvas.clientHeight
+  );
+  if (!(unitsPerPixel > 0)) return;
+  for (const sprite of measurementLabels) {
+    const label = sprite.userData.measurementLabel;
+    sprite.position.copy(label.anchor).addScaledVector(
+      label.offsetDirection, label.offsetPixels * unitsPerPixel
+    );
+    sprite.scale.set(label.widthPixels * unitsPerPixel, label.heightPixels * unitsPerPixel, 1);
+  }
+}
+
+controls.addEventListener('change', refresh3dMeasurements);
 
 // --- Render pipeline ------------------------------------------------------
 let pending = 0;
@@ -358,13 +563,15 @@ async function runPreview(code) {
 }
 
 function clear3dPreview() {
-  for (const child of [...previewGroup.children]) {
-    previewGroup.remove(child);
+  for (const child of [...modelGroup.children]) {
+    modelGroup.remove(child);
     child.geometry?.dispose();
     if (child.material !== material2d && child.material !== material3d) {
       child.material?.dispose();
     }
   }
+  measurementBounds = null;
+  rebuild3dMeasurements(true);
 }
 
 function clear2dPreview() {
@@ -381,6 +588,7 @@ function showPlaceholder(message) {
   clear2dPreview();
   canvas.hidden = true;
   fit3dButton.hidden = true;
+  axes3dButton.hidden = true;
   viewer2d.hidden = true;
   emptyPreview.textContent = message;
   emptyPreview.hidden = false;
@@ -395,12 +603,15 @@ function show3d(stl) {
   viewer2d.hidden = true;
   canvas.hidden = false;
   fit3dButton.hidden = false;
+  axes3dButton.hidden = false;
   clear2dPreview();
 
   clear3dPreview();
   const geom = parseStl(stl);
-  previewGroup.add(new THREE.Mesh(geom, material3d));
+  modelGroup.add(new THREE.Mesh(geom, material3d));
+  updateMeasurementBounds();
   if (!has3dViewpoint) fit3dPreview();
+  else refresh3dMeasurements();
   return geom.attributes.position.count / 3;
 }
 
@@ -429,7 +640,7 @@ function parseStl(stl) {
 }
 
 function fit3dPreview() {
-  const bounds = new THREE.Box3().setFromObject(previewGroup);
+  const bounds = new THREE.Box3().setFromObject(modelGroup);
   if (bounds.isEmpty()) return;
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
@@ -442,16 +653,25 @@ function fit3dPreview() {
   controls.target.copy(center);
   controls.update();
   has3dViewpoint = true;
+  refresh3dMeasurements();
 }
 
 fit3dButton.addEventListener('click', fit3dPreview);
 canvas.addEventListener('dblclick', fit3dPreview);
+axes3dButton.addEventListener('click', () => {
+  axes3dVisible = !axes3dVisible;
+  measurementGroup.visible = axes3dVisible;
+  axes3dButton.setAttribute('aria-pressed', String(axes3dVisible));
+  axes3dButton.textContent = axes3dVisible ? 'Hide axes' : 'Show axes';
+  if (axes3dVisible) refresh3dMeasurements();
+});
 
 function showHybrid(parts) {
   emptyPreview.hidden = true;
   viewer2d.hidden = true;
   canvas.hidden = false;
   fit3dButton.hidden = false;
+  axes3dButton.hidden = false;
   clear2dPreview();
   clear3dPreview();
 
@@ -461,12 +681,14 @@ function showHybrid(parts) {
   for (const part of parts) {
     const geom = parseStl(part.data);
     const partMaterial = materialForPart(part);
-    previewGroup.add(new THREE.Mesh(geom, partMaterial));
+    modelGroup.add(new THREE.Mesh(geom, partMaterial));
     triangles += geom.attributes.position.count / 3;
     if (part.dimension === 2) twoDimensionalParts++;
     else threeDimensionalParts++;
   }
+  updateMeasurementBounds();
   if (!has3dViewpoint) fit3dPreview();
+  else refresh3dMeasurements();
   return { triangles, twoDimensionalParts, threeDimensionalParts };
 }
 
@@ -483,18 +705,11 @@ function parseSvgBounds(svg) {
 }
 
 function gridStepForScale(scale) {
-  const targetModelUnits = 64 / scale;
-  const power = 10 ** Math.floor(Math.log10(targetModelUnits));
-  const normalized = targetModelUnits / power;
-  const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return multiplier * power;
+  return measurementInterval(1 / scale, 64);
 }
 
 function formatAxisValue(value, step) {
-  const normalized = Math.abs(value) < step * 1e-6 ? 0 : value;
-  const decimals = Math.min(6, Math.max(0, -Math.floor(Math.log10(step))));
-  const fixed = normalized.toFixed(decimals);
-  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed;
+  return formatMeasuredValue(value, step);
 }
 
 function draw2dGrid() {
@@ -712,6 +927,7 @@ function show2d(svg) {
   emptyPreview.hidden = true;
   canvas.hidden = true;
   fit3dButton.hidden = true;
+  axes3dButton.hidden = true;
   viewer2d.hidden = false;
   clear3dPreview();
 

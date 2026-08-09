@@ -69,6 +69,17 @@ test('the 3D viewer preserves its viewpoint between renders and supports refitti
   assert.match(extensionSource, /id="fit3d"/);
 });
 
+test('the 3D measurement layer uses OpenSCAD space and can be hidden', () => {
+  assert.match(viewerSource, /previewGroup\.add\(modelGroup, measurementGroup\)/);
+  assert.match(viewerSource, /new THREE\.LineSegments\(geometry, material\)/);
+  assert.match(viewerSource, /new THREE\.SpriteMaterial/);
+  assert.match(viewerSource, /controls\.addEventListener\('change', refresh3dMeasurements\)/);
+  assert.match(viewerSource, /perspectiveWorldUnitsPerPixel/);
+  assert.match(viewerSource, /const axisNameOffset = direction\.clone\(\)\.multiplyScalar\(36\)/);
+  assert.match(viewerSource, /addScaledVector\(LABEL_OFFSETS\[axis\], 32\)/);
+  assert.match(extensionSource, /id="axes3d"/);
+});
+
 test('2D axis measurements adapt to zoom and preserve OpenSCAD Y direction', () => {
   assert.match(viewerSource, /function formatAxisValue\(/);
   assert.match(viewerSource, /formatAxisValue\(value, step\)/);
