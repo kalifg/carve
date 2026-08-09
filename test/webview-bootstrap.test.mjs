@@ -40,6 +40,17 @@ test('every WASM instance receives output hooks during construction', () => {
   assert.doesNotMatch(viewerSource, /Module\.printErr\s*=/);
 });
 
+test('the preview exposes captured compiler output in a collapsible console', () => {
+  assert.match(extensionSource, /id="consoleToggle"/);
+  assert.match(extensionSource, /id="compileConsole"/);
+  assert.match(extensionSource, /id="compileLog"/);
+  assert.match(viewerSource, /function setCompileLog\(/);
+  assert.match(viewerSource, /log: capturedLog\(\)/);
+  assert.match(viewerSource, /if \(hasProblems\) setConsoleOpen\(true\)/);
+  assert.match(viewerSource, /setCompileLog\(result\.log \|\| result\.stderr\);\s*setConsoleOpen\(true\)/);
+  assert.match(viewerSource, /setCompileLog\(String\(e\)\);\s*setConsoleOpen\(true\)/);
+});
+
 test('the 2D viewer supports fit, pointer-centered zoom, pan, and axes', () => {
   assert.match(viewerSource, /function fit2d\(/);
   assert.match(viewerSource, /addEventListener\('wheel'/);
@@ -69,6 +80,7 @@ test('empty geometry is a neutral preview state and localization noise is filter
   assert.match(viewerSource, /function cleanStderr\(/);
   assert.match(viewerSource, /Could not initialize localization/);
   assert.match(viewerSource, /function isEmptyTopLevel\(/);
+  assert.match(viewerSource, /!\/\^ERROR:\/mi\.test\(stderr\)/);
   assert.match(viewerSource, /empty: true/);
   assert.match(viewerSource, /function showEmpty\(/);
   assert.match(extensionSource, /id="emptyPreview"/);

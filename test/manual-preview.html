@@ -16,20 +16,32 @@
     #viewer2dGrid { width: 100%; height: 100%; pointer-events: none; }
     #svgPreview { display: block; max-width: none; max-height: none;
                   transform-origin: 0 0; pointer-events: none; user-select: none; }
-    #fit2d { position: absolute; z-index: 3; right: 10px; bottom: 10px; }
+    .viewer-button { position: absolute; z-index: 3; bottom: 10px; }
+    .fit-button { right: 10px; }
+    #axes3d { right: 58px; }
     [hidden] { display: none !important; }
     #status.error { background: rgba(150,30,30,0.75); }
+    #consoleToggle { left: 10px; }
+    #compileConsole { position: absolute; z-index: 6; left: 8px; right: 8px; bottom: 44px;
+                      max-height: 42vh; overflow: auto; background: #1e1e1e; border: 1px solid #666; }
+    #compileLog { margin: 0; padding: 10px 12px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <canvas id="viewer"></canvas>
+  <button id="consoleToggle" class="viewer-button" type="button" aria-expanded="false">Compilation log</button>
+  <button id="axes3d" class="viewer-button" type="button" aria-pressed="true" hidden>Hide axes</button>
+  <button id="fit3d" class="viewer-button fit-button" type="button" hidden>Fit</button>
   <div id="emptyPreview" hidden>No top-level geometry to preview</div>
   <div id="viewer2d" hidden>
     <canvas id="viewer2dGrid"></canvas>
     <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />
-    <button id="fit2d" type="button">Fit</button>
+    <button id="fit2d" class="viewer-button fit-button" type="button">Fit</button>
   </div>
   <div id="status">Loading OpenSCAD WebAssembly…</div>
+  <section id="compileConsole" aria-label="OpenSCAD compilation log" hidden>
+    <pre id="compileLog">No compiler output yet.</pre>
+  </section>
   <script>
     const hybridFixture = `
       $fn = 32;

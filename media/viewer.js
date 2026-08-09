@@ -32,7 +32,7 @@ function cleanStderr(stderr) {
 }
 
 function isEmptyTopLevel(stderr) {
-  return /Current top level object is empty/i.test(stderr);
+  return /Current top level object is empty/i.test(stderr) && !/^ERROR:/mi.test(stderr);
 }
 
 function isMixedDimensions(stderr) {
@@ -58,11 +58,30 @@ const viewer2dGrid = document.getElementById('viewer2dGrid');
 const svgPreview = document.getElementById('svgPreview');
 const fit3dButton = document.getElementById('fit3d');
 const fit2dButton = document.getElementById('fit2d');
+const consoleToggle = document.getElementById('consoleToggle');
+const compileConsole = document.getElementById('compileConsole');
+const compileLog = document.getElementById('compileLog');
 
 const setStatus = (text, isError = false) => {
   $status.textContent = text;
   $status.classList.toggle('error', !!isError);
 };
+
+function setConsoleOpen(open) {
+  compileConsole.hidden = !open;
+  consoleToggle.setAttribute('aria-expanded', String(open));
+}
+
+function setCompileLog(text) {
+  const output = String(text ?? '').trim();
+  const hasProblems = /^(?:ERROR|WARNING|TRACE):/m.test(output);
+  compileLog.textContent = output || 'OpenSCAD produced no compiler output.';
+  consoleToggle.classList.toggle('has-problems', hasProblems);
+  consoleToggle.textContent = hasProblems ? 'Compilation log \u26a0' : 'Compilation log';
+  if (hasProblems) setConsoleOpen(true);
+}
+
+consoleToggle.addEventListener('click', () => setConsoleOpen(compileConsole.hidden));
 
 function createOutputCapture() {
   const out = [];
@@ -74,6 +93,10 @@ function createOutputCapture() {
     stderr: () => err.join('\n'),
     reset: () => { out.length = 0; err.length = 0; }
   };
+}
+
+function capturedLog() {
+  return [capture.stdout().trim(), cleanStderr(capture.stderr())].filter(Boolean).join('\n');
 }
 
 setStatus('Loading openscad.wasm\u2026');
@@ -184,22 +207,31 @@ async function runOpenscad(code, format) {
   moduleUsed = true;
   capture.reset();
   try { Module.FS.writeFile('/in.scad', code); } catch (e) {
-    return { success: false, stderr: 'FS.writeFile failed: ' + e.message };
+    const stderr = 'FS.writeFile failed: ' + e.message;
+    return { success: false, stderr, log: stderr };
   }
   let rc;
   try {
     rc = Module.callMain(['/in.scad', '-o', '/out', '--export-format=' + format]);
   } catch (e) {
-    return { success: false, stderr: cleanStderr(capture.stderr()) || String(e) };
+    const stderr = cleanStderr(capture.stderr()) || String(e);
+    return { success: false, stderr, log: capturedLog() || stderr };
   }
   if (rc !== 0 && rc !== undefined) {
-    return { success: false, stderr: cleanStderr(capture.stderr()) || `OpenSCAD exited ${rc}` };
+    const stderr = cleanStderr(capture.stderr()) || `OpenSCAD exited ${rc}`;
+    return { success: false, stderr, log: capturedLog() || stderr };
   }
   let data;
   try { data = Module.FS.readFile('/out'); } catch (e) {
-    return { success: false, stderr: cleanStderr(capture.stderr()) || 'No output produced' };
+    const stderr = cleanStderr(capture.stderr()) || 'No output produced';
+    return { success: false, stderr, log: capturedLog() || stderr };
   }
-  return { success: true, data, stderr: cleanStderr(capture.stderr()) };
+  return {
+    success: true,
+    data,
+    stderr: cleanStderr(capture.stderr()),
+    log: capturedLog()
+  };
 }
 
 let preferredPreviewFormat = PREVIEW_3D_FORMAT;
@@ -290,7 +322,7 @@ async function runPreview(code) {
   const format = preferredPreviewFormat;
   const result = await runOpenscad(code, format);
   if (isMixedDimensions(result.stderr)) {
-    return runHybridPreview(code);
+    return { ...await runHybridPreview(code), log: result.log };
   }
   if (result.success) {
     // Some OpenSCAD builds successfully export only the 3D portion when a
@@ -298,11 +330,11 @@ async function runPreview(code) {
     // circle(...)). In that case there is no mixed-dimension warning to
     // trigger the normal fallback, so proactively inspect likely mixed files.
     const sceneResult = await enhancedScenePreview(code, format);
-    if (sceneResult) return sceneResult;
+    if (sceneResult) return { ...sceneResult, stderr: result.stderr, log: result.log };
     return { ...result, format };
   }
   if (isEmptyTopLevel(result.stderr)) {
-    return { ...result, success: true, empty: true, stderr: '', format };
+    return { ...result, success: true, empty: true, format };
   }
 
   const fallbackFormat = fallbackPreviewFormat(format, result.stderr);
@@ -310,15 +342,17 @@ async function runPreview(code) {
 
   const fallbackResult = await runOpenscad(code, fallbackFormat);
   if (isMixedDimensions(fallbackResult.stderr)) {
-    return runHybridPreview(code);
+    return { ...await runHybridPreview(code), log: fallbackResult.log };
   }
   if (isEmptyTopLevel(fallbackResult.stderr)) {
-    return { ...fallbackResult, success: true, empty: true, stderr: '', format: fallbackFormat };
+    return { ...fallbackResult, success: true, empty: true, format: fallbackFormat };
   }
   if (fallbackResult.success) {
     preferredPreviewFormat = fallbackFormat;
     const sceneResult = await enhancedScenePreview(code, fallbackFormat);
-    if (sceneResult) return sceneResult;
+    if (sceneResult) {
+      return { ...sceneResult, stderr: fallbackResult.stderr, log: fallbackResult.log };
+    }
   }
   return { ...fallbackResult, format: fallbackFormat };
 }
@@ -694,6 +728,7 @@ async function renderToScene(code) {
   const myId = ++pending;
   const t0 = performance.now();
   setStatus('Rendering\u2026');
+  setCompileLog('Compiling\u2026');
   const result = await runPreview(code);
   if (myId !== pending) return; // superseded
   const ms = (performance.now() - t0).toFixed(0);
@@ -701,11 +736,14 @@ async function renderToScene(code) {
     if (result.mixedDimensions) {
       showPlaceholder('This branch mixes incompatible 2D and 3D operations');
     }
-    setStatus(`Error (${ms} ms)\n${result.stderr || 'OpenSCAD produced no diagnostic output.'}`, true);
+    setCompileLog(result.log || result.stderr);
+    setConsoleOpen(true);
+    setStatus(`Error \u00b7 ${ms} ms \u00b7 see compilation log`, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: result.stderr });
     return;
   }
   try {
+    setCompileLog(result.log);
     if (result.empty) {
       showEmpty();
       setStatus(`Empty \u00b7 ${ms} ms \u00b7 no top-level geometry`);
@@ -732,6 +770,8 @@ async function renderToScene(code) {
     }
     vscode.postMessage({ type: 'rendered', success: true, stderr: result.stderr });
   } catch (e) {
+    setCompileLog(String(e));
+    setConsoleOpen(true);
     setStatus('Preview failed: ' + e.message, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: String(e) });
   }
@@ -739,9 +779,12 @@ async function renderToScene(code) {
 
 async function doExport(code, format) {
   setStatus('Exporting (' + format + ')\u2026');
+  setCompileLog('Compiling export\u2026');
   const result = await runOpenscad(code, format);
+  setCompileLog(result.log || result.stderr);
   if (!result.success) {
     vscode.postMessage({ type: 'exportResult', success: false, error: result.stderr });
+    setConsoleOpen(true);
     setStatus('Export failed', true);
     return;
   }

@@ -95,6 +95,14 @@ test('bundled OpenSCAD WASM reports an empty top-level object', async () => {
   assert.match(result.stderr, /Current top level object is empty/i);
 });
 
+test('bundled OpenSCAD WASM reports assertion messages and source lines', async () => {
+  const result = await render('assert(false, "sample assertion failed"); cube(10);', 'binstl');
+
+  assert.equal(result.success, false);
+  assert.match(result.stderr, /ERROR: Assertion 'false' failed: "sample assertion failed"/);
+  assert.match(result.stderr, /line 1/);
+});
+
 test('bundled OpenSCAD WASM warns and drops geometry when dimensions are mixed', async () => {
   const code = 'circle(10); translate([30, 0, 0]) cube(10);';
   const stlResult = await render(code, 'binstl');

@@ -30,6 +30,14 @@ slot_source_diameter = 30;
 slot_from_top = 3;
 slot_from_bottom = 1;
 
+// These messages are visible in Carve's Compilation log. Change a dimension
+// to an invalid value to see the assertion and its source line.
+echo("Plate dimensions", width = cover_width, height = cover_height, depth = cover_depth);
+assert(cover_width > 0 && cover_height > 0 && cover_depth > 0,
+       "Cover dimensions must all be greater than zero");
+assert(inset_width < cover_width && inset_height < cover_height,
+       "The inset must fit inside the cover");
+
 module hole() {
     translate([
         cover_width / 2, 
@@ -158,5 +166,3 @@ color("grey") {
             rotate([0, -90, 0]) brick_lines();       
     }
 }
-
-        

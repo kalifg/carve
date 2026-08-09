@@ -1,6 +1,9 @@
 # Change Log
 
 ## Unreleased
+
+- Add a collapsible compilation log for OpenSCAD assertions, errors, warnings, echoes, and render statistics
+- Publish warnings from successful renders to VS Code's Problems pane
 - Add SVG previews for top-level 2D geometry
 - Automatically switch between SVG and STL when a model changes dimensionality
 - Add zoom-to-fit, wheel/pinch zoom, drag-to-pan, grid, and X/Y axes for 2D previews

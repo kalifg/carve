@@ -6,6 +6,7 @@ const DIAG = vscode.languages.createDiagnosticCollection('carve');
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let renderTimer: NodeJS.Timeout | undefined;
+let renderedDocument: vscode.TextDocument | undefined;
 
 export function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(
@@ -57,6 +58,7 @@ function openPreview(ctx: vscode.ExtensionContext) {
   panel.webview.onDidReceiveMessage((msg) => onWebviewMessage(msg));
   panel.onDidDispose(() => {
     currentPanel = undefined;
+    renderedDocument = undefined;
     vscode.commands.executeCommand('setContext', 'carve.previewActive', false);
     DIAG.clear();
   });
@@ -70,11 +72,7 @@ function onWebviewMessage(msg: any) {
       triggerRender(true);
       break;
     case 'rendered':
-      if (msg.success) {
-        DIAG.clear();
-      } else {
-        publishDiagnostics(msg.stderr ?? '');
-      }
+      publishDiagnostics(msg.stderr ?? '');
       break;
     case 'log':
       console.log('[carve webview]', msg.text);
@@ -109,6 +107,10 @@ function triggerRender(force: boolean) {
 
 function renderDocument(doc: vscode.TextDocument, force: boolean) {
   if (!currentPanel) return;
+  if (renderedDocument && renderedDocument.uri.toString() !== doc.uri.toString()) {
+    DIAG.delete(renderedDocument.uri);
+  }
+  renderedDocument = doc;
   currentPanel.webview.postMessage({
     type: 'render',
     code: doc.getText(),
@@ -162,23 +164,25 @@ async function exportStl() {
 }
 
 function publishDiagnostics(stderr: string) {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.languageId !== 'scad') return;
+  const doc = renderedDocument;
+  if (!doc || doc.languageId !== 'scad') return;
   const diags: vscode.Diagnostic[] = [];
   // OpenSCAD error format examples:
   //   ERROR: Parser error in file "/in.scad", line 3: syntax error
   //   WARNING: ... in file /in.scad, line 5
-  const re = /(ERROR|WARNING):\s*([^\n]*?)(?:in file [^,\n]*,?\s*)?line\s+(\d+)/gi;
+  const re = /^(ERROR|WARNING):\s*(.+)$/gim;
   let m: RegExpExecArray | null;
   while ((m = re.exec(stderr))) {
     const sev = m[1].toUpperCase() === 'ERROR'
       ? vscode.DiagnosticSeverity.Error
       : vscode.DiagnosticSeverity.Warning;
-    const line = Math.max(0, parseInt(m[3], 10) - 1);
-    const range = editor.document.lineAt(Math.min(line, editor.document.lineCount - 1)).range;
-    diags.push(new vscode.Diagnostic(range, m[2].trim() || m[0], sev));
+    const location = m[2].match(/\s+in file\s+[^,\n]+,?\s+line\s+(\d+)/i);
+    const line = Math.max(0, parseInt(location?.[1] ?? '1', 10) - 1);
+    const range = doc.lineAt(Math.min(line, doc.lineCount - 1)).range;
+    const message = m[2].replace(/\s+in file\s+[^,\n]+,?\s+line\s+\d+/i, '').trim();
+    diags.push(new vscode.Diagnostic(range, message || m[0], sev));
   }
-  DIAG.set(editor.document.uri, diags);
+  DIAG.set(doc.uri, diags);
 }
 
 function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string {
@@ -223,28 +227,45 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
   #viewer2dGrid { width: 100%; height: 100%; pointer-events: none; }
   #svgPreview { display: block; max-width: none; max-height: none;
                 transform-origin: 0 0; pointer-events: none; user-select: none; }
-  .fit-button { position: absolute; z-index: 3; right: 10px; bottom: 10px;
+  .viewer-button { position: absolute; z-index: 3; bottom: 10px;
            border: 1px solid var(--vscode-button-border, #999);
            border-radius: 4px; padding: 4px 9px;
            color: var(--vscode-button-foreground, #fff);
            background: var(--vscode-button-background, #555); cursor: pointer; }
-  .fit-button:hover { background: var(--vscode-button-hoverBackground, #666); }
+  .viewer-button:hover { background: var(--vscode-button-hoverBackground, #666); }
+  .fit-button { right: 10px; }
+  #axes3d { right: 58px; }
   [hidden] { display: none !important; }
   #status.error { background: rgba(150,30,30,0.75); }
+  #consoleToggle { left: 10px; }
+  #consoleToggle.has-problems { background: var(--vscode-inputValidation-warningBackground, #7a5d00); }
+  #compileConsole { position: absolute; z-index: 6; left: 8px; right: 8px; bottom: 44px;
+                    max-height: 42vh; overflow: auto; border: 1px solid var(--vscode-panel-border, #666);
+                    border-radius: 4px; background: var(--vscode-panel-background, #1e1e1e);
+                    box-shadow: 0 3px 12px rgba(0,0,0,0.45); }
+  #compileLog { margin: 0; padding: 10px 12px; color: var(--vscode-terminal-foreground, #ddd);
+                font: 12px/1.45 var(--vscode-editor-font-family); white-space: pre-wrap;
+                word-break: break-word; user-select: text; }
 </style>
 </head>
 <body>
 <canvas id="viewer"></canvas>
-<button id="fit3d" class="fit-button" type="button" hidden
+<button id="consoleToggle" class="viewer-button" type="button" aria-expanded="false"
+        title="Show or hide OpenSCAD compiler output">Compilation log</button>
+<button id="axes3d" class="viewer-button" type="button" aria-pressed="true" hidden>Hide axes</button>
+<button id="fit3d" class="viewer-button fit-button" type="button" hidden
         title="Zoom to fit (double-click the canvas)">Fit</button>
 <div id="emptyPreview" hidden>No top-level geometry to preview</div>
 <div id="viewer2d" hidden>
   <canvas id="viewer2dGrid"></canvas>
   <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />
-  <button id="fit2d" class="fit-button" type="button"
+  <button id="fit2d" class="viewer-button fit-button" type="button"
           title="Zoom to fit (double-click the canvas)">Fit</button>
 </div>
 <div id="status">Loading OpenSCAD WebAssembly\u2026</div>
+<section id="compileConsole" aria-label="OpenSCAD compilation log" hidden>
+  <pre id="compileLog">No compiler output yet.</pre>
+</section>
 <script type="importmap" nonce="${nonce}">
 {
   "imports": {

@@ -18,6 +18,7 @@
 - 🧭 **OrbitControls** — drag to orbit, scroll to zoom, right-click to pan
 - 📤 **Export** — STL / 3MF / OFF / AMF / OBJ via `Carve: Export STL`
 - 🪲 **Inline diagnostics** — OpenSCAD parser/render errors surface in VS Code's Problems pane
+- 🧾 **Compilation log** — inspect OpenSCAD assertions, errors, warnings, echoes, and render statistics in the preview
 - 🌐 **Works in vscode.dev / Codespaces / Remote SSH** — pure WASM, no native deps
 - 🎨 **Syntax highlighting** for the SCAD language
 
@@ -27,7 +28,8 @@
 2. Press **`Ctrl+K V`** (`Cmd+K V` on macOS) to open the preview beside the editor
 3. Edit your code — the model re-renders ~500 ms after you stop typing
 4. Drag the viewer to orbit, scroll to zoom
-5. Run **`Carve: Export STL`** from the command palette to save geometry to disk
+5. Select **Compilation log** at the bottom of the preview to inspect OpenSCAD output
+6. Run **`Carve: Export STL`** from the command palette to save geometry to disk
 
 ## Commands
 
