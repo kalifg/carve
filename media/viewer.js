@@ -86,7 +86,6 @@ function setCompileLog(text) {
   compileLog.textContent = output || 'OpenSCAD produced no compiler output.';
   consoleToggle.classList.toggle('has-problems', hasProblems);
   consoleToggle.textContent = hasProblems ? 'Compilation log \u26a0' : 'Compilation log';
-  if (hasProblems) setConsoleOpen(true);
 }
 
 consoleToggle.addEventListener('click', () => setConsoleOpen(compileConsole.hidden));
@@ -148,16 +147,28 @@ async function freshModule() {
 
 // --- Three.js scene -------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x2a2a3a);
+scene.background = new THREE.Color(0xf1f1ef);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
 camera.position.set(80, 80, 80);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-dir.position.set(1, 1, 1);
-scene.add(dir);
+
+// A neutral studio rig keeps gray OpenSCAD parts legible from every orbit
+// angle while preserving enough directionality to reveal recesses and edges.
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8b92a3, 1.35));
+const keyLight = new THREE.DirectionalLight(0xfff8ed, 2.4);
+keyLight.position.set(4, 6, 5);
+scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0xdde8ff, 1.1);
+fillLight.position.set(-4, 2, 3);
+scene.add(fillLight);
+const rimLight = new THREE.DirectionalLight(0xffffff, 0.8);
+rimLight.position.set(2, 4, -5);
+scene.add(rimLight);
 const previewGroup = new THREE.Group();
 previewGroup.rotation.x = -Math.PI / 2; // OpenSCAD Z-up -> Three.js Y-up
 scene.add(previewGroup);
@@ -193,7 +204,7 @@ let view2dWidth = 0;
 let view2dHeight = 0;
 let has3dViewpoint = false;
 const material3d = new THREE.MeshStandardMaterial({
-  color: 0xf9b233, metalness: 0.1, roughness: 0.6, flatShading: true
+  color: 0xf9b233, metalness: 0, roughness: 0.72, flatShading: true
 });
 const material2d = new THREE.MeshStandardMaterial({
   color: 0xffd166,
@@ -953,8 +964,10 @@ async function renderToScene(code) {
       showPlaceholder('This branch mixes incompatible 2D and 3D operations');
     }
     setCompileLog(result.log || result.stderr);
-    setConsoleOpen(true);
-    setStatus(`Error \u00b7 ${ms} ms \u00b7 see compilation log`, true);
+    setStatus(
+      `Error (${ms} ms)\n${result.stderr || 'OpenSCAD produced no diagnostic output.'}`,
+      true
+    );
     vscode.postMessage({ type: 'rendered', success: false, stderr: result.stderr });
     return;
   }
@@ -987,7 +1000,6 @@ async function renderToScene(code) {
     vscode.postMessage({ type: 'rendered', success: true, stderr: result.stderr });
   } catch (e) {
     setCompileLog(String(e));
-    setConsoleOpen(true);
     setStatus('Preview failed: ' + e.message, true);
     vscode.postMessage({ type: 'rendered', success: false, stderr: String(e) });
   }
@@ -1000,7 +1012,6 @@ async function doExport(code, format) {
   setCompileLog(result.log || result.stderr);
   if (!result.success) {
     vscode.postMessage({ type: 'exportResult', success: false, error: result.stderr });
-    setConsoleOpen(true);
     setStatus('Export failed', true);
     return;
   }

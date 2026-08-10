@@ -46,9 +46,8 @@ test('the preview exposes captured compiler output in a collapsible console', ()
   assert.match(extensionSource, /id="compileLog"/);
   assert.match(viewerSource, /function setCompileLog\(/);
   assert.match(viewerSource, /log: capturedLog\(\)/);
-  assert.match(viewerSource, /if \(hasProblems\) setConsoleOpen\(true\)/);
-  assert.match(viewerSource, /setCompileLog\(result\.log \|\| result\.stderr\);\s*setConsoleOpen\(true\)/);
-  assert.match(viewerSource, /setCompileLog\(String\(e\)\);\s*setConsoleOpen\(true\)/);
+  assert.doesNotMatch(viewerSource, /setConsoleOpen\(true\)/);
+  assert.match(viewerSource, /`Error \(\$\{ms\} ms\)\\n\$\{result\.stderr/);
 });
 
 test('the 2D viewer supports fit, pointer-centered zoom, pan, and axes', () => {
@@ -67,6 +66,14 @@ test('the 3D viewer preserves its viewpoint between renders and supports refitti
   assert.match(viewerSource, /fit3dButton\.addEventListener\('click', fit3dPreview\)/);
   assert.match(viewerSource, /canvas\.addEventListener\('dblclick', fit3dPreview\)/);
   assert.match(extensionSource, /id="fit3d"/);
+});
+
+test('the 3D viewer uses a light studio background and balanced lighting', () => {
+  assert.match(viewerSource, /renderer\.outputColorSpace = THREE\.SRGBColorSpace/);
+  assert.match(viewerSource, /renderer\.toneMapping = THREE\.ACESFilmicToneMapping/);
+  assert.match(viewerSource, /scene\.background = new THREE\.Color\(0xf1f1ef\)/);
+  assert.match(viewerSource, /new THREE\.HemisphereLight/);
+  assert.equal(viewerSource.match(/new THREE\.DirectionalLight/g)?.length, 3);
 });
 
 test('the 3D measurement layer uses OpenSCAD space and can be hidden', () => {

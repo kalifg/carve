@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Add a collapsible compilation log for OpenSCAD assertions, errors, warnings, echoes, and render statistics
+- Improve gray-part visibility with a light 3D background, color management, and balanced studio lighting
+- Add a user-controlled compilation log for OpenSCAD assertions, errors, warnings, echoes, and render statistics
 - Publish warnings from successful renders to VS Code's Problems pane
 - Add SVG previews for top-level 2D geometry
 - Automatically switch between SVG and STL when a model changes dimensionality
