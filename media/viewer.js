@@ -692,9 +692,12 @@ function fit3dPreview() {
 // Camera directions are expressed in Three.js scene space. The preview group
 // rotates OpenSCAD's Z-up coordinates into Three.js's Y-up coordinates.
 const PLANE_VIEWS = {
-  X: { direction: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
-  Y: { direction: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
-  Z: { direction: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, -1) }
+  '+X': { direction: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+  '-X': { direction: new THREE.Vector3(-1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+  '+Y': { direction: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
+  '-Y': { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
+  '+Z': { direction: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, -1) },
+  '-Z': { direction: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, -1) }
 };
 
 function setPlaneView(plane) {

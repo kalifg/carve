@@ -77,13 +77,17 @@ test('the 3D viewer preserves its viewpoint between renders and supports refitti
   assert.match(extensionSource, /id="fit3d"/);
 });
 
-test('the 3D viewer offers X, Y, and Z plane-aligned view presets', () => {
+test('the 3D viewer offers positive and negative plane-aligned view presets', () => {
   assert.match(extensionSource, /id="viewPresets3d"/);
   assert.deepEqual(
-    [...extensionSource.matchAll(/data-plane-view="([XYZ])"/g)].map((match) => match[1]),
-    ['X', 'Y', 'Z']
+    [...extensionSource.matchAll(/data-plane-view="([+-][XYZ])"/g)].map((match) => match[1]),
+    ['+X', '+Y', '+Z', '-X', '-Y', '-Z']
   );
+  assert.match(extensionSource, /grid-template-columns: repeat\(3, auto\)/);
   assert.match(viewerSource, /const PLANE_VIEWS =/);
+  for (const view of ['+X', '-X', '+Y', '-Y', '+Z', '-Z']) {
+    assert.match(viewerSource, new RegExp(`'\\${view}'`));
+  }
   assert.match(viewerSource, /function setPlaneView\(plane\)/);
   assert.match(viewerSource, /button\.dataset\.planeView/);
 });
