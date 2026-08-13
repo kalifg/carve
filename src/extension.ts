@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { fontsForDocument } from './fonts';
 
 const VIEW_TYPE = 'carve.preview';
 const DIAG = vscode.languages.createDiagnosticCollection('carve');
@@ -7,6 +8,8 @@ const DIAG = vscode.languages.createDiagnosticCollection('carve');
 let currentPanel: vscode.WebviewPanel | undefined;
 let renderTimer: NodeJS.Timeout | undefined;
 let renderedDocument: vscode.TextDocument | undefined;
+let renderGeneration = 0;
+let sentFonts = new Set<string>();
 
 export function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(
@@ -59,6 +62,7 @@ function openPreview(ctx: vscode.ExtensionContext) {
   panel.onDidDispose(() => {
     currentPanel = undefined;
     renderedDocument = undefined;
+    sentFonts = new Set<string>();
     vscode.commands.executeCommand('setContext', 'carve.previewActive', false);
     DIAG.clear();
   });
@@ -105,17 +109,29 @@ function triggerRender(force: boolean) {
   renderDocument(doc, force);
 }
 
-function renderDocument(doc: vscode.TextDocument, force: boolean) {
+async function renderDocument(doc: vscode.TextDocument, force: boolean) {
   if (!currentPanel) return;
+  const generation = ++renderGeneration;
+  const code = doc.getText();
   if (renderedDocument && renderedDocument.uri.toString() !== doc.uri.toString()) {
     DIAG.delete(renderedDocument.uri);
   }
   renderedDocument = doc;
+  const cfg = vscode.workspace.getConfiguration('carve', doc.uri);
+  const configuredFonts = cfg.get<string[]>('fontFiles', []);
+  const availableFonts = await fontsForDocument(code, configuredFonts);
+  if (!currentPanel || generation !== renderGeneration) return;
+  const fonts = availableFonts.filter((font) => {
+    if (sentFonts.has(font.name)) return false;
+    sentFonts.add(font.name);
+    return true;
+  });
   currentPanel.webview.postMessage({
     type: 'render',
-    code: doc.getText(),
+    code,
     fileName: path.basename(doc.fileName),
     format: 'binstl',
+    fonts,
     force
   });
 }
@@ -130,6 +146,7 @@ async function exportStl() {
     vscode.window.showWarningMessage('Open the Carve preview first (Carve: Open Live Preview).');
     return;
   }
+  const panel = currentPanel;
   const cfg = vscode.workspace.getConfiguration('carve');
   const fmt = cfg.get<string>('exportFormat', 'binstl');
   const ext = fmt.startsWith('stl') || fmt.endsWith('stl') ? 'stl' : fmt;
@@ -143,7 +160,7 @@ async function exportStl() {
   if (!target) return;
 
   // Listen for one-shot export reply
-  const disposable = currentPanel.webview.onDidReceiveMessage(async (msg) => {
+  const disposable = panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type !== 'exportResult') return;
     disposable.dispose();
     if (!msg.success) {
@@ -155,11 +172,19 @@ async function exportStl() {
     vscode.window.showInformationMessage(`Exported ${buf.byteLength} bytes to ${target.fsPath}`);
   });
 
-  currentPanel.webview.postMessage({
+  panel.webview.postMessage({
     type: 'export',
     code: editor.document.getText(),
     fileName: path.basename(editor.document.fileName),
-    format: fmt
+    format: fmt,
+    fonts: (await fontsForDocument(
+      editor.document.getText(),
+      cfg.get<string[]>('fontFiles', [])
+    )).filter((font) => {
+      if (sentFonts.has(font.name)) return false;
+      sentFonts.add(font.name);
+      return true;
+    })
   });
 }
 
@@ -220,13 +245,6 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
   #viewer { width: 100vw; height: 100vh; display: block; }
   #emptyPreview { width: 100vw; height: 100vh; display: grid; place-items: center;
                   color: var(--vscode-descriptionForeground, #aaa); font-size: 13px; }
-  #viewer2d { position: relative; width: 100vw; height: 100vh; overflow: hidden;
-              background: #f7f7f7; cursor: grab; touch-action: none; user-select: none; }
-  #viewer2d.panning { cursor: grabbing; }
-  #viewer2dGrid, #svgPreview { position: absolute; left: 0; top: 0; }
-  #viewer2dGrid { width: 100%; height: 100%; pointer-events: none; }
-  #svgPreview { display: block; max-width: none; max-height: none;
-                transform-origin: 0 0; pointer-events: none; user-select: none; }
   .viewer-button { position: absolute; z-index: 3; bottom: 10px;
            border: 1px solid var(--vscode-button-border, #999);
            border-radius: 4px; padding: 4px 9px;
@@ -270,12 +288,6 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
 <button id="fit3d" class="viewer-button fit-button" type="button" hidden
         title="Zoom to fit (double-click the canvas)">Fit</button>
 <div id="emptyPreview" hidden>No top-level geometry to preview</div>
-<div id="viewer2d" hidden>
-  <canvas id="viewer2dGrid"></canvas>
-  <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />
-  <button id="fit2d" class="viewer-button fit-button" type="button"
-          title="Zoom to fit (double-click the canvas)">Fit</button>
-</div>
 <div id="status">Loading OpenSCAD WebAssembly\u2026</div>
 <section id="compileConsole" aria-label="OpenSCAD compilation log" hidden>
   <pre id="compileLog">No compiler output yet.</pre>

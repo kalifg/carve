@@ -10,7 +10,7 @@ Add OpenSCAD-style measured X, Y, and Z axes to Carve's orbitable 3D and hybrid 
 - `previewGroup` is rotated `-90°` around X to convert OpenSCAD's Z-up coordinates to Three.js's Y-up coordinates.
 - `fit3dPreview()` frames the combined mesh bounds and updates `OrbitControls.target`.
 - The current `THREE.GridHelper(100, 10, ...)` is static and has no numeric labels.
-- The native 2D SVG viewer already has a useful 1/2/5 adaptive-step algorithm in `gridStepForScale()` and `formatAxisValue()`.
+- The shared measurement utilities provide the 1/2/5 adaptive-step algorithm used by the 3D measurement layer.
 
 ## Recommended implementation
 
@@ -24,7 +24,7 @@ Add OpenSCAD-style measured X, Y, and Z axes to Carve's orbitable 3D and hybrid 
    worldUnitsPerPixel = worldHeight / viewportHeight
    ```
 
-5. Choose a major interval near 60–100 screen pixels using a 1/2/5 × 10ⁿ sequence, matching the 2D viewer's behavior.
+5. Choose a major interval near 60–100 screen pixels using a 1/2/5 × 10ⁿ sequence.
 6. Create tick marks and numeric labels at major intervals. Canvas-backed `THREE.Sprite` labels avoid another runtime dependency and naturally face the camera.
 7. Keep label size approximately constant in screen space. Rebuild the measurement layer only when the selected interval or displayed range changes, rather than every animation frame.
 8. Refresh measurements after camera controls change, viewport resize, and `fit3dPreview()`.

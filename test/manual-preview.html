@@ -9,13 +9,6 @@
               background: rgba(0,0,0,0.65); border-radius: 4px; pointer-events: none; }
     #viewer { width: 100vw; height: 100vh; display: block; }
     #emptyPreview { width: 100vw; height: 100vh; display: grid; place-items: center; color: #aaa; }
-    #viewer2d { position: relative; width: 100vw; height: 100vh; overflow: hidden;
-                background: #f7f7f7; cursor: grab; touch-action: none; user-select: none; }
-    #viewer2d.panning { cursor: grabbing; }
-    #viewer2dGrid, #svgPreview { position: absolute; left: 0; top: 0; }
-    #viewer2dGrid { width: 100%; height: 100%; pointer-events: none; }
-    #svgPreview { display: block; max-width: none; max-height: none;
-                  transform-origin: 0 0; pointer-events: none; user-select: none; }
     .viewer-button { position: absolute; z-index: 3; bottom: 10px; }
     .fit-button { right: 10px; }
     #axes3d { right: 58px; }
@@ -42,11 +35,6 @@
   <button id="projection3d" class="viewer-button" type="button" aria-pressed="false" hidden>Isometric</button>
   <button id="fit3d" class="viewer-button fit-button" type="button" hidden>Fit</button>
   <div id="emptyPreview" hidden>No top-level geometry to preview</div>
-  <div id="viewer2d" hidden>
-    <canvas id="viewer2dGrid"></canvas>
-    <img id="svgPreview" alt="OpenSCAD 2D preview" draggable="false" />
-    <button id="fit2d" class="viewer-button fit-button" type="button">Fit</button>
-  </div>
   <div id="status">Loading OpenSCAD WebAssembly…</div>
   <section id="compileConsole" aria-label="OpenSCAD compilation log" hidden>
     <pre id="compileLog">No compiler output yet.</pre>

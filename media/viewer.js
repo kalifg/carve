@@ -25,7 +25,6 @@ import {
 // resolve the import map before executing any module code, so an unresolved
 // helper import prevents even the WASM error handler from running.
 const PREVIEW_3D_FORMAT = 'binstl';
-const PREVIEW_2D_FORMAT = 'svg';
 const PREVIEW_CSG_FORMAT = 'csg';
 const PREVIEW_HYBRID_FORMAT = 'hybrid';
 const PREVIEW_SCENE_FORMAT = 'scene';
@@ -47,29 +46,23 @@ function isMixedDimensions(stderr) {
   return /Mixing 2D and 3D objects is not supported/i.test(stderr);
 }
 
-function fallbackPreviewFormat(format, stderr) {
-  if (format === PREVIEW_3D_FORMAT && /not a 3D object/i.test(stderr)) {
-    return PREVIEW_2D_FORMAT;
-  }
-  if (format === PREVIEW_2D_FORMAT && /not a 2D object/i.test(stderr)) {
-    return PREVIEW_3D_FORMAT;
-  }
-  return undefined;
+function without3dProbeNoise(output) {
+  return String(output ?? '')
+    .split('\n')
+    .filter((line) => !/Current top level object is not a 3D object/i.test(line))
+    .join('\n')
+    .trim();
 }
 
 const vscode = acquireVsCodeApi();
 const $status = document.getElementById('status');
 const canvas = document.getElementById('viewer');
-const viewer2d = document.getElementById('viewer2d');
 const emptyPreview = document.getElementById('emptyPreview');
-const viewer2dGrid = document.getElementById('viewer2dGrid');
-const svgPreview = document.getElementById('svgPreview');
 const fit3dButton = document.getElementById('fit3d');
 const axes3dButton = document.getElementById('axes3d');
 const viewPresets3d = document.getElementById('viewPresets3d');
 const planeViewButtons = document.querySelectorAll('[data-plane-view]');
 const projection3dButton = document.getElementById('projection3d');
-const fit2dButton = document.getElementById('fit2d');
 const consoleToggle = document.getElementById('consoleToggle');
 const compileConsole = document.getElementById('compileConsole');
 const compileLog = document.getElementById('compileLog');
@@ -114,6 +107,35 @@ setStatus('Loading openscad.wasm\u2026');
 let wasmBinary;
 let capture;
 let Module; // current instance, replaced per render
+const availableFonts = new Map();
+
+function decodeBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function registerFonts(fonts = []) {
+  for (const font of fonts) {
+    if (font?.name && font?.data && !availableFonts.has(font.name)) {
+      availableFonts.set(font.name, decodeBase64(font.data));
+    }
+  }
+}
+
+function installFonts(M) {
+  if (availableFonts.size === 0) return;
+  M.FS.mkdirTree('/fonts');
+  M.FS.writeFile('/fonts/fonts.conf', `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig><dir>/fonts</dir><cachedir>/tmp/fontconfig-cache</cachedir></fontconfig>`);
+  let index = 0;
+  for (const [name, data] of availableFonts) {
+    const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    M.FS.writeFile(`/fonts/${index++}-${safeName}`, data);
+  }
+}
 try {
   const wasmUrl = new URL(import.meta.resolve('openscad-wasm'));
   wasmBinary = await fetch(wasmUrl).then((r) => r.arrayBuffer());
@@ -146,6 +168,7 @@ async function freshModule() {
     print: capture.print,
     printErr: capture.printErr
   });
+  installFonts(M);
   return M;
 }
 
@@ -200,14 +223,6 @@ let measurementKey = '';
 let measurementLabels = [];
 let axes3dVisible = true;
 
-let svgObjectUrl = null;
-let svgBounds = null;
-let view2dScale = 1;
-let view2dOffsetX = 0;
-let view2dOffsetY = 0;
-let view2dIsFitted = true;
-let view2dWidth = 0;
-let view2dHeight = 0;
 let has3dViewpoint = false;
 const material3d = new THREE.MeshStandardMaterial({
   color: 0xf9b233, metalness: 0, roughness: 0.72, flatShading: true
@@ -234,7 +249,6 @@ function resize() {
     orthographicCamera.updateProjectionMatrix();
     refresh3dMeasurements();
   }
-  resize2d();
 }
 function loop() {
   requestAnimationFrame(loop);
@@ -391,7 +405,7 @@ function rebuild3dMeasurements(force = false) {
         AXIS_COLORS[axis]
       );
       createMeasurementLabel(
-        formatAxisValue(value, step), AXIS_COLORS[axis], anchor, LABEL_OFFSETS[axis]
+        formatMeasuredValue(value, step), AXIS_COLORS[axis], anchor, LABEL_OFFSETS[axis]
       );
     }
     const axisNameOffset = direction.clone().multiplyScalar(36)
@@ -436,6 +450,7 @@ async function runOpenscad(code, format) {
   if (moduleUsed) {
     Module = await freshModule();
   }
+  installFonts(Module);
   moduleUsed = true;
   capture.reset();
   try { Module.FS.writeFile('/in.scad', code); } catch (e) {
@@ -466,7 +481,6 @@ async function runOpenscad(code, format) {
   };
 }
 
-let preferredPreviewFormat = PREVIEW_3D_FORMAT;
 async function runCsgScenePreview(code, requireMixedDimensions = false) {
   const csgResult = await runOpenscad(code, PREVIEW_CSG_FORMAT);
   if (!csgResult.success) {
@@ -551,8 +565,7 @@ async function enhancedScenePreview(code, format) {
 }
 
 async function runPreview(code) {
-  const format = preferredPreviewFormat;
-  const result = await runOpenscad(code, format);
+  const result = await runOpenscad(code, PREVIEW_3D_FORMAT);
   if (isMixedDimensions(result.stderr)) {
     return { ...await runHybridPreview(code), log: result.log };
   }
@@ -561,32 +574,25 @@ async function runPreview(code) {
     // transformed 2D root collapses edge-on (for example rotate([0,90,0])
     // circle(...)). In that case there is no mixed-dimension warning to
     // trigger the normal fallback, so proactively inspect likely mixed files.
-    const sceneResult = await enhancedScenePreview(code, format);
+    const sceneResult = await enhancedScenePreview(code, PREVIEW_3D_FORMAT);
     if (sceneResult) return { ...sceneResult, stderr: result.stderr, log: result.log };
-    return { ...result, format };
+    return { ...result, format: PREVIEW_3D_FORMAT };
   }
   if (isEmptyTopLevel(result.stderr)) {
-    return { ...result, success: true, empty: true, format };
+    return { ...result, success: true, empty: true, format: PREVIEW_3D_FORMAT };
   }
 
-  const fallbackFormat = fallbackPreviewFormat(format, result.stderr);
-  if (!fallbackFormat) return { ...result, format };
-
-  const fallbackResult = await runOpenscad(code, fallbackFormat);
-  if (isMixedDimensions(fallbackResult.stderr)) {
-    return { ...await runHybridPreview(code), log: fallbackResult.log };
-  }
-  if (isEmptyTopLevel(fallbackResult.stderr)) {
-    return { ...fallbackResult, success: true, empty: true, format: fallbackFormat };
-  }
-  if (fallbackResult.success) {
-    preferredPreviewFormat = fallbackFormat;
-    const sceneResult = await enhancedScenePreview(code, fallbackFormat);
-    if (sceneResult) {
-      return { ...sceneResult, stderr: fallbackResult.stderr, log: fallbackResult.log };
+  if (/not a 3D object/i.test(result.stderr)) {
+    const sceneResult = await runCsgScenePreview(code);
+    if (sceneResult.success || sceneResult.mixedDimensions) {
+      return {
+        ...sceneResult,
+        stderr: without3dProbeNoise(result.stderr),
+        log: without3dProbeNoise(result.log)
+      };
     }
   }
-  return { ...fallbackResult, format: fallbackFormat };
+  return { ...result, format: PREVIEW_3D_FORMAT };
 }
 
 function clear3dPreview() {
@@ -601,24 +607,13 @@ function clear3dPreview() {
   rebuild3dMeasurements(true);
 }
 
-function clear2dPreview() {
-  if (svgObjectUrl) URL.revokeObjectURL(svgObjectUrl);
-  svgObjectUrl = null;
-  svgBounds = null;
-  svgPreview.removeAttribute('src');
-  const ctx = viewer2dGrid.getContext('2d');
-  ctx?.clearRect(0, 0, viewer2dGrid.width, viewer2dGrid.height);
-}
-
 function showPlaceholder(message) {
   clear3dPreview();
-  clear2dPreview();
   canvas.hidden = true;
   fit3dButton.hidden = true;
   axes3dButton.hidden = true;
   viewPresets3d.hidden = true;
   projection3dButton.hidden = true;
-  viewer2d.hidden = true;
   emptyPreview.textContent = message;
   emptyPreview.hidden = false;
 }
@@ -629,14 +624,11 @@ function showEmpty() {
 
 function show3d(stl) {
   emptyPreview.hidden = true;
-  viewer2d.hidden = true;
   canvas.hidden = false;
   fit3dButton.hidden = false;
   axes3dButton.hidden = false;
   viewPresets3d.hidden = false;
   projection3dButton.hidden = false;
-  clear2dPreview();
-
   clear3dPreview();
   const geom = parseStl(stl);
   modelGroup.add(new THREE.Mesh(geom, material3d));
@@ -764,13 +756,11 @@ axes3dButton.addEventListener('click', () => {
 
 function showHybrid(parts) {
   emptyPreview.hidden = true;
-  viewer2d.hidden = true;
   canvas.hidden = false;
   fit3dButton.hidden = false;
   axes3dButton.hidden = false;
   viewPresets3d.hidden = false;
   projection3dButton.hidden = false;
-  clear2dPreview();
   clear3dPreview();
 
   let triangles = 0;
@@ -788,256 +778,6 @@ function showHybrid(parts) {
   if (!has3dViewpoint) fit3dPreview();
   else refresh3dMeasurements();
   return { triangles, twoDimensionalParts, threeDimensionalParts };
-}
-
-function parseSvgBounds(svg) {
-  const source = new TextDecoder().decode(svg);
-  const match = source.match(/\bviewBox\s*=\s*["']([^"']+)["']/i);
-  if (!match) throw new Error('OpenSCAD SVG has no viewBox.');
-  const values = match[1].trim().split(/[\s,]+/).map(Number);
-  if (values.length !== 4 || values.some((value) => !Number.isFinite(value)) ||
-      values[2] <= 0 || values[3] <= 0) {
-    throw new Error('OpenSCAD SVG has an invalid viewBox.');
-  }
-  return { x: values[0], y: values[1], width: values[2], height: values[3] };
-}
-
-function gridStepForScale(scale) {
-  return measurementInterval(1 / scale, 64);
-}
-
-function formatAxisValue(value, step) {
-  return formatMeasuredValue(value, step);
-}
-
-function draw2dGrid() {
-  if (!svgBounds || viewer2d.hidden || view2dWidth === 0 || view2dHeight === 0) return;
-  const dpr = window.devicePixelRatio || 1;
-  const pixelWidth = Math.round(view2dWidth * dpr);
-  const pixelHeight = Math.round(view2dHeight * dpr);
-  if (viewer2dGrid.width !== pixelWidth || viewer2dGrid.height !== pixelHeight) {
-    viewer2dGrid.width = pixelWidth;
-    viewer2dGrid.height = pixelHeight;
-  }
-
-  const ctx = viewer2dGrid.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, view2dWidth, view2dHeight);
-
-  const step = gridStepForScale(view2dScale);
-  const minX = -view2dOffsetX / view2dScale;
-  const maxX = (view2dWidth - view2dOffsetX) / view2dScale;
-  const minSvgY = -view2dOffsetY / view2dScale;
-  const maxSvgY = (view2dHeight - view2dOffsetY) / view2dScale;
-
-  ctx.beginPath();
-  ctx.strokeStyle = '#dfdfdf';
-  ctx.lineWidth = 1;
-  for (let x = Math.ceil(minX / step) * step; x <= maxX; x += step) {
-    const screenX = view2dOffsetX + x * view2dScale;
-    ctx.moveTo(screenX, 0);
-    ctx.lineTo(screenX, view2dHeight);
-  }
-  for (let y = Math.ceil(minSvgY / step) * step; y <= maxSvgY; y += step) {
-    const screenY = view2dOffsetY + y * view2dScale;
-    ctx.moveTo(0, screenY);
-    ctx.lineTo(view2dWidth, screenY);
-  }
-  ctx.stroke();
-
-  const originX = view2dOffsetX;
-  const originY = view2dOffsetY;
-  const zeroTolerance = step * 1e-6;
-  ctx.font = '11px sans-serif';
-
-  if (originY >= 0 && originY <= view2dHeight) {
-    ctx.beginPath();
-    ctx.strokeStyle = '#d64545';
-    ctx.lineWidth = 1.5;
-    ctx.moveTo(0, originY);
-    ctx.lineTo(view2dWidth, originY);
-    ctx.moveTo(view2dWidth - 7, originY - 4);
-    ctx.lineTo(view2dWidth, originY);
-    ctx.lineTo(view2dWidth - 7, originY + 4);
-    const firstXTick = Math.ceil(minX / step);
-    const lastXTick = Math.floor(maxX / step);
-    for (let tick = firstXTick; tick <= lastXTick; tick++) {
-      const value = tick * step;
-      if (Math.abs(value) < zeroTolerance) continue;
-      const screenX = view2dOffsetX + value * view2dScale;
-      ctx.moveTo(screenX, originY - 4);
-      ctx.lineTo(screenX, originY + 4);
-    }
-    ctx.stroke();
-
-    ctx.fillStyle = '#b52d2d';
-    ctx.textAlign = 'center';
-    const labelsBelow = originY <= view2dHeight - 22;
-    ctx.textBaseline = labelsBelow ? 'top' : 'bottom';
-    const labelY = originY + (labelsBelow ? 6 : -6);
-    for (let tick = firstXTick; tick <= lastXTick; tick++) {
-      const value = tick * step;
-      if (Math.abs(value) < zeroTolerance) continue;
-      const screenX = view2dOffsetX + value * view2dScale;
-      const label = formatAxisValue(value, step);
-      const halfWidth = ctx.measureText(label).width / 2;
-      if (screenX > halfWidth + 2 && screenX < view2dWidth - halfWidth - 26) {
-        ctx.fillText(label, screenX, labelY);
-      }
-    }
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('X', view2dWidth - 9, labelY);
-    ctx.font = '11px sans-serif';
-  }
-  if (originX >= 0 && originX <= view2dWidth) {
-    ctx.beginPath();
-    ctx.strokeStyle = '#36a269';
-    ctx.lineWidth = 1.5;
-    ctx.moveTo(originX, 0);
-    ctx.lineTo(originX, view2dHeight);
-    ctx.moveTo(originX - 4, 7);
-    ctx.lineTo(originX, 0);
-    ctx.lineTo(originX + 4, 7);
-    const firstYTick = Math.ceil(minSvgY / step);
-    const lastYTick = Math.floor(maxSvgY / step);
-    for (let tick = firstYTick; tick <= lastYTick; tick++) {
-      const svgValue = tick * step;
-      if (Math.abs(svgValue) < zeroTolerance) continue;
-      const screenY = view2dOffsetY + svgValue * view2dScale;
-      ctx.moveTo(originX - 4, screenY);
-      ctx.lineTo(originX + 4, screenY);
-    }
-    ctx.stroke();
-
-    ctx.fillStyle = '#25784d';
-    const labelsRight = originX <= view2dWidth - 46;
-    ctx.textAlign = labelsRight ? 'left' : 'right';
-    ctx.textBaseline = 'middle';
-    const labelX = originX + (labelsRight ? 7 : -7);
-    for (let tick = firstYTick; tick <= lastYTick; tick++) {
-      const svgValue = tick * step;
-      if (Math.abs(svgValue) < zeroTolerance) continue;
-      const screenY = view2dOffsetY + svgValue * view2dScale;
-      if (screenY > 24 && screenY < view2dHeight - 9) {
-        // SVG's screen Y direction is opposite OpenSCAD's model Y direction.
-        ctx.fillText(formatAxisValue(-svgValue, step), labelX, screenY);
-      }
-    }
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textBaseline = 'top';
-    ctx.fillText('Y', labelX, 9);
-    ctx.font = '11px sans-serif';
-  }
-  if (originX >= 0 && originX <= view2dWidth && originY >= 0 && originY <= view2dHeight) {
-    ctx.fillStyle = '#555';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('0', originX + 6, originY + 6);
-  }
-}
-
-function update2dTransform() {
-  if (!svgBounds) return;
-  svgPreview.style.width = `${svgBounds.width}px`;
-  svgPreview.style.height = `${svgBounds.height}px`;
-  const imageX = view2dOffsetX + svgBounds.x * view2dScale;
-  const imageY = view2dOffsetY + svgBounds.y * view2dScale;
-  svgPreview.style.transform = `translate(${imageX}px, ${imageY}px) scale(${view2dScale})`;
-  draw2dGrid();
-}
-
-function fit2d() {
-  if (!svgBounds) return;
-  const width = viewer2d.clientWidth;
-  const height = viewer2d.clientHeight;
-  if (width === 0 || height === 0) return;
-  const padding = Math.max(32, Math.min(width, height) * 0.07);
-  view2dScale = Math.min(
-    (width - padding * 2) / svgBounds.width,
-    (height - padding * 2) / svgBounds.height
-  );
-  view2dOffsetX = (width - svgBounds.width * view2dScale) / 2 - svgBounds.x * view2dScale;
-  view2dOffsetY = (height - svgBounds.height * view2dScale) / 2 - svgBounds.y * view2dScale;
-  view2dIsFitted = true;
-  update2dTransform();
-}
-
-function resize2d() {
-  if (viewer2d.hidden) return;
-  const width = viewer2d.clientWidth;
-  const height = viewer2d.clientHeight;
-  if (width === 0 || height === 0 || (width === view2dWidth && height === view2dHeight)) return;
-  view2dWidth = width;
-  view2dHeight = height;
-  if (view2dIsFitted) fit2d();
-  else update2dTransform();
-}
-
-viewer2d.addEventListener('wheel', (event) => {
-  if (!svgBounds) return;
-  event.preventDefault();
-  const rect = viewer2d.getBoundingClientRect();
-  const pointerX = event.clientX - rect.left;
-  const pointerY = event.clientY - rect.top;
-  const modelX = (pointerX - view2dOffsetX) / view2dScale;
-  const modelY = (pointerY - view2dOffsetY) / view2dScale;
-  const zoomFactor = Math.exp(-event.deltaY * 0.0015);
-  const newScale = Math.min(500, Math.max(0.02, view2dScale * zoomFactor));
-  view2dOffsetX = pointerX - modelX * newScale;
-  view2dOffsetY = pointerY - modelY * newScale;
-  view2dScale = newScale;
-  view2dIsFitted = false;
-  update2dTransform();
-}, { passive: false });
-
-let pan2dPointerId = null;
-let pan2dX = 0;
-let pan2dY = 0;
-viewer2d.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || event.target === fit2dButton) return;
-  pan2dPointerId = event.pointerId;
-  pan2dX = event.clientX;
-  pan2dY = event.clientY;
-  viewer2d.setPointerCapture(event.pointerId);
-  viewer2d.classList.add('panning');
-});
-viewer2d.addEventListener('pointermove', (event) => {
-  if (event.pointerId !== pan2dPointerId) return;
-  view2dOffsetX += event.clientX - pan2dX;
-  view2dOffsetY += event.clientY - pan2dY;
-  pan2dX = event.clientX;
-  pan2dY = event.clientY;
-  view2dIsFitted = false;
-  update2dTransform();
-});
-function end2dPan(event) {
-  if (event.pointerId !== pan2dPointerId) return;
-  pan2dPointerId = null;
-  viewer2d.classList.remove('panning');
-}
-viewer2d.addEventListener('pointerup', end2dPan);
-viewer2d.addEventListener('pointercancel', end2dPan);
-viewer2d.addEventListener('dblclick', fit2d);
-fit2dButton.addEventListener('click', fit2d);
-
-function show2d(svg) {
-  emptyPreview.hidden = true;
-  canvas.hidden = true;
-  fit3dButton.hidden = true;
-  axes3dButton.hidden = true;
-  viewPresets3d.hidden = true;
-  projection3dButton.hidden = true;
-  viewer2d.hidden = false;
-  clear3dPreview();
-
-  svgBounds = parseSvgBounds(svg);
-  if (svgObjectUrl) URL.revokeObjectURL(svgObjectUrl);
-  svgObjectUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-  svgPreview.src = svgObjectUrl;
-  view2dWidth = viewer2d.clientWidth;
-  view2dHeight = viewer2d.clientHeight;
-  requestAnimationFrame(fit2d);
 }
 
 async function renderToScene(code) {
@@ -1074,14 +814,11 @@ async function renderToScene(code) {
       );
     } else if (result.format === PREVIEW_SCENE_FORMAT) {
       const summary = showHybrid(result.parts);
-      setStatus(
-        `OK \u00b7 ${ms} ms \u00b7 3D color scene \u00b7 ` +
-        `${summary.threeDimensionalParts} parts \u00b7 ` +
-        `${summary.triangles.toLocaleString()} triangles`
-      );
-    } else if (result.format === PREVIEW_2D_FORMAT) {
-      show2d(result.data);
-      setStatus(`OK \u00b7 ${ms} ms \u00b7 2D SVG \u00b7 ${result.data.byteLength.toLocaleString()} B`);
+      const sceneLabel = summary.twoDimensionalParts > 0
+        ? `2D geometry in 3D view \u00b7 ${summary.twoDimensionalParts} flat parts`
+        : `3D color scene \u00b7 ${summary.threeDimensionalParts} parts`;
+      setStatus(`OK \u00b7 ${ms} ms \u00b7 ${sceneLabel} \u00b7 ` +
+        `${summary.triangles.toLocaleString()} triangles`);
     } else {
       const tris = show3d(result.data);
       setStatus(`OK \u00b7 ${ms} ms \u00b7 3D \u00b7 ${tris.toLocaleString()} triangles \u00b7 ${result.data.byteLength.toLocaleString()} B`);
@@ -1117,6 +854,7 @@ async function doExport(code, format) {
 
 window.addEventListener('message', (ev) => {
   const msg = ev.data;
+  registerFonts(msg?.fonts);
   if (msg?.type === 'render') renderToScene(msg.code);
   else if (msg?.type === 'export') doExport(msg.code, msg.format || 'binstl');
 });

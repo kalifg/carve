@@ -4,16 +4,15 @@
   <img src="images/icon.png" width="120" alt="Carve icon" />
 </p>
 
-**Carve** is a VS Code extension that gives you a live, no-install 2D and 3D preview of [OpenSCAD](https://openscad.org/) `.scad` files — entirely in-browser via WebAssembly. No native OpenSCAD binary required.
+**Carve** is a VS Code extension that gives you a live, no-install preview of 2D and 3D [OpenSCAD](https://openscad.org/) `.scad` files in one orbitable 3D viewer — entirely in-browser via WebAssembly. No native OpenSCAD binary required.
 
 ![Carve hero](images/hero.png)
 
 ## Features
 
 - 🔄 **Live preview** — open any `.scad` file, hit `Ctrl+K V`, and watch your model update as you type
-- 📐 **2D geometry** — previews top-level 2D models as SVG, automatically switching between 2D and 3D as you edit
+- 📐 **2D geometry** — renders top-level 2D models as flat geometry in the same orbitable 3D scene
 - 🧩 **Hybrid preview** — shows independent flat 2D profiles beside solid 3D geometry in one orbitable scene
-- 🔎 **2D navigation** — zoom to fit, wheel/pinch zoom, drag to pan, plus a coordinate grid and measured X/Y axes
 - 🧱 **Self-contained** — ships the full OpenSCAD engine as ~10 MB of WebAssembly, plus a Three.js mesh viewer
 - 🧭 **OrbitControls** — drag to orbit, scroll to zoom, right-click to pan
 - 🧊 **Plane view presets** — jump to X, Y, or Z-aligned views, then keep orbiting normally
@@ -48,6 +47,9 @@
 | `carve.autoRender` | `true` | Re-render as you type |
 | `carve.debounceMs` | `500` | Delay before re-rendering after a change |
 | `carve.exportFormat` | `binstl` | Format for `Carve: Export STL` (`binstl`, `asciistl`, `off`, `amf`, `3mf`, `obj`) |
+| `carve.fontFiles` | `[]` | Extra font file paths for `text()` (supports `.ttf`, `.otf`, `.ttc`, `.otc`, and `~`) |
+
+Carve automatically makes fonts referenced by a literal `font = "Family Name"` available from the extension host's standard system font folders. If the font family does not resemble its filename, add its file path to `carve.fontFiles`. In Remote SSH or Codespaces, these are the remote host's fonts rather than fonts installed on your local computer.
 
 ## How it works
 

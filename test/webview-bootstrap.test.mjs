@@ -28,9 +28,12 @@ test('every bare viewer import is represented in the webview import map', () => 
   }
 });
 
-test('the 2D fallback does not add another webview startup module', () => {
-  assert.match(viewerSource, /const PREVIEW_2D_FORMAT = 'svg'/);
-  assert.match(viewerSource, /function fallbackPreviewFormat\(/);
+test('pure 2D previews use the 3D scene pipeline instead of SVG', () => {
+  assert.match(viewerSource, /if \(\/not a 3D object\/i\.test\(result\.stderr\)\)/);
+  assert.match(viewerSource, /const sceneResult = await runCsgScenePreview\(code\)/);
+  assert.match(viewerSource, /wrap2dForPreview\(branch\.source/);
+  assert.match(viewerSource, /function without3dProbeNoise\(/);
+  assert.doesNotMatch(viewerSource, /PREVIEW_2D_FORMAT|show2d|svgPreview/);
   assert.doesNotMatch(extensionSource, /carve-preview-format/);
 });
 
@@ -38,6 +41,15 @@ test('every WASM instance receives output hooks during construction', () => {
   assert.equal(viewerSource.match(/print: capture\.print,/g)?.length, 2);
   assert.equal(viewerSource.match(/printErr: capture\.printErr/g)?.length, 2);
   assert.doesNotMatch(viewerSource, /Module\.printErr\s*=/);
+});
+
+test('host fonts are installed into every OpenSCAD virtual filesystem', () => {
+  assert.match(extensionSource, /fontsForDocument/);
+  assert.match(viewerSource, /function installFonts\(M\)/);
+  assert.match(viewerSource, /\/fonts\/fonts\.conf/);
+  assert.match(viewerSource, /installFonts\(Module\)/);
+  assert.match(viewerSource, /installFonts\(M\)/);
+  assert.match(viewerSource, /registerFonts\(msg\?\.fonts\)/);
 });
 
 test('the preview exposes captured compiler output in a collapsible console', () => {
@@ -50,14 +62,11 @@ test('the preview exposes captured compiler output in a collapsible console', ()
   assert.match(viewerSource, /`Error \(\$\{ms\} ms\)\\n\$\{result\.stderr/);
 });
 
-test('the 2D viewer supports fit, pointer-centered zoom, pan, and axes', () => {
-  assert.match(viewerSource, /function fit2d\(/);
-  assert.match(viewerSource, /addEventListener\('wheel'/);
-  assert.match(viewerSource, /setPointerCapture\(event\.pointerId\)/);
-  assert.match(viewerSource, /strokeStyle = '#d64545'/);
-  assert.match(viewerSource, /strokeStyle = '#36a269'/);
-  assert.match(extensionSource, /id="viewer2dGrid"/);
-  assert.match(extensionSource, /id="fit2d"/);
+test('the webview has a single Three.js viewer for both 2D and 3D geometry', () => {
+  assert.match(extensionSource, /<canvas id="viewer"><\/canvas>/);
+  assert.doesNotMatch(extensionSource, /viewer2d|svgPreview|fit2d/);
+  assert.match(viewerSource, /const material2d = new THREE\.MeshStandardMaterial/);
+  assert.match(viewerSource, /2D geometry in 3D view/);
 });
 
 test('the 3D viewer preserves its viewpoint between renders and supports refitting', () => {
@@ -106,13 +115,6 @@ test('the 3D measurement layer uses OpenSCAD space and can be hidden', () => {
   assert.match(viewerSource, /const axisNameOffset = direction\.clone\(\)\.multiplyScalar\(36\)/);
   assert.match(viewerSource, /addScaledVector\(LABEL_OFFSETS\[axis\], 32\)/);
   assert.match(extensionSource, /id="axes3d"/);
-});
-
-test('2D axis measurements adapt to zoom and preserve OpenSCAD Y direction', () => {
-  assert.match(viewerSource, /function formatAxisValue\(/);
-  assert.match(viewerSource, /formatAxisValue\(value, step\)/);
-  assert.match(viewerSource, /formatAxisValue\(-svgValue, step\)/);
-  assert.match(viewerSource, /const step = gridStepForScale\(view2dScale\)/);
 });
 
 test('empty geometry is a neutral preview state and localization noise is filtered', () => {

@@ -69,6 +69,12 @@
           "default": "binstl",
           "enum": ["binstl", "asciistl", "off", "amf", "3mf", "obj"],
           "description": "Format used by Carve: Export STL command."
+        },
+        "carve.fontFiles": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Additional .ttf, .otf, .ttc, or .otc font files to make available to OpenSCAD text(). Use this when a font's family name does not match its filename. Paths beginning with ~ are supported."
         }
       }
     }
