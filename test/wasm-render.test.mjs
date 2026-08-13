@@ -235,3 +235,26 @@ test('normalized CSG preserves evaluated colors through nested groups and transf
     assert.equal(stlResult.success, true, stlResult.stderr);
   }
 });
+
+test('normalized CSG preserves colors nested inside a top-level union', async () => {
+  const code = `
+    union() {
+      color("salmon") difference() { cube(10); sphere(3); }
+      translate([15, 0, 0]) union() {
+        color("gold") cylinder(h = 10, r = 3);
+        color("dodgerblue") translate([0, 0, 10]) sphere(3);
+      }
+    }
+  `;
+  const csgResult = await render(code, 'csg');
+
+  assert.equal(csgResult.success, true, csgResult.stderr);
+  const parts = splitCsgForPreview(new TextDecoder().decode(csgResult.data));
+  assert.equal(parts.length, 3);
+  assert.equal(parts.filter((part) => part.color).length, 3);
+
+  for (const part of parts) {
+    const stlResult = await render(part.source, 'binstl');
+    assert.equal(stlResult.success, true, stlResult.stderr);
+  }
+});

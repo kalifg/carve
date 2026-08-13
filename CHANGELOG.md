@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve evaluated colors when colored parts are nested inside OpenSCAD union containers
 - Improve gray-part visibility with a light 3D background, color management, and balanced studio lighting
 - Add a user-controlled compilation log for OpenSCAD assertions, errors, warnings, echoes, and render statistics
 - Publish warnings from successful renders to VS Code's Problems pane

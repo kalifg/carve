@@ -121,3 +121,25 @@ test('splits presentation-safe wrappers and carries evaluated colors', () => {
   assert.match(parts[1].source, /multmatrix/);
   assert.match(parts[1].source, /color\(\[1, 0\.25, 0\.5, 0\.4\]\)/);
 });
+
+test('finds evaluated colors nested inside union containers', () => {
+  const source = `
+    union() {
+      group() {
+        union() {
+          color([1, 0.5, 0.25, 1]) { cube(10); }
+          color([0.1, 0.6, 1, 1]) { sphere(6); }
+        }
+      }
+    }
+  `;
+
+  const parts = splitCsgForPreview(source);
+
+  assert.equal(parts.length, 2);
+  assert.deepEqual(parts.map((part) => part.color), [
+    { r: 1, g: 0.5, b: 0.25, a: 1 },
+    { r: 0.1, g: 0.6, b: 1, a: 1 }
+  ]);
+  assert.ok(parts.every((part) => part.source.startsWith('union()')));
+});

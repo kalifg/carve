@@ -191,7 +191,10 @@ function wrap2dBranch(root, thickness) {
 }
 
 function peelTransparentWrapper(root) {
-  const match = root.match(/^([#%!*]\s*)?(multmatrix|color|group)\s*\(/);
+  // Normalized CSG commonly wraps a whole colored assembly in union()/group().
+  // Splitting those containers into separately rendered meshes preserves their
+  // geometry while allowing descendant color() nodes to become materials.
+  const match = root.match(/^([#%!*]\s*)?(multmatrix|color|group|union)\s*\(/);
   if (!match) return undefined;
 
   let quote = null;
