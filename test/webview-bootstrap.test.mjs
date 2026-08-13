@@ -68,6 +68,27 @@ test('the 3D viewer preserves its viewpoint between renders and supports refitti
   assert.match(extensionSource, /id="fit3d"/);
 });
 
+test('the 3D viewer offers X, Y, and Z plane-aligned view presets', () => {
+  assert.match(extensionSource, /id="viewPresets3d"/);
+  assert.deepEqual(
+    [...extensionSource.matchAll(/data-plane-view="([XYZ])"/g)].map((match) => match[1]),
+    ['X', 'Y', 'Z']
+  );
+  assert.match(viewerSource, /const PLANE_VIEWS =/);
+  assert.match(viewerSource, /function setPlaneView\(plane\)/);
+  assert.match(viewerSource, /button\.dataset\.planeView/);
+});
+
+test('the 3D viewer toggles between perspective and isometric projection', () => {
+  assert.match(extensionSource, /id="projection3d"/);
+  assert.match(viewerSource, /new THREE\.OrthographicCamera/);
+  assert.match(viewerSource, /function setOrthographicProjection\(enabled\)/);
+  assert.match(viewerSource, /controls\.object = camera/);
+  assert.match(viewerSource, /projection3dButton\.addEventListener\('click', toggle3dProjection\)/);
+  const toggleBody = viewerSource.match(/function toggle3dProjection\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.doesNotMatch(toggleBody, /fit3dPreview/);
+});
+
 test('the 3D viewer uses a light studio background and balanced lighting', () => {
   assert.match(viewerSource, /renderer\.outputColorSpace = THREE\.SRGBColorSpace/);
   assert.match(viewerSource, /renderer\.toneMapping = THREE\.ACESFilmicToneMapping/);

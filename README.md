@@ -16,6 +16,8 @@
 - 🔎 **2D navigation** — zoom to fit, wheel/pinch zoom, drag to pan, plus a coordinate grid and measured X/Y axes
 - 🧱 **Self-contained** — ships the full OpenSCAD engine as ~10 MB of WebAssembly, plus a Three.js mesh viewer
 - 🧭 **OrbitControls** — drag to orbit, scroll to zoom, right-click to pan
+- 🧊 **Plane view presets** — jump to X, Y, or Z-aligned views, then keep orbiting normally
+- 📽️ **Projection toggle** — switch between perspective and isometric/orthographic views
 - 📤 **Export** — STL / 3MF / OFF / AMF / OBJ via `Carve: Export STL`
 - 🪲 **Inline diagnostics** — OpenSCAD parser/render errors surface in VS Code's Problems pane
 - 🧾 **Compilation log** — inspect OpenSCAD assertions, errors, warnings, echoes, and render statistics in the preview

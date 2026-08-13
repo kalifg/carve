@@ -5,6 +5,7 @@ import {
   formatMeasuredValue,
   measurementInterval,
   measurementTickRange,
+  orthographicWorldUnitsPerPixel,
   paddedMeasurementRange,
   perspectiveWorldUnitsPerPixel
 } from '../media/measurement-utils.mjs';
@@ -12,6 +13,11 @@ import {
 test('perspective scale reports world units per viewport pixel', () => {
   assert.ok(Math.abs(perspectiveWorldUnitsPerPixel(100, 90, 1000) - 0.2) < 1e-12);
   assert.equal(perspectiveWorldUnitsPerPixel(100, 45, 0), 0);
+});
+
+test('orthographic scale accounts for zoom and viewport height', () => {
+  assert.equal(orthographicWorldUnitsPerPixel(200, 2, 1000), 0.1);
+  assert.equal(orthographicWorldUnitsPerPixel(200, 0, 1000), 0);
 });
 
 test('measurement intervals follow the 1/2/5 sequence across magnitudes', () => {

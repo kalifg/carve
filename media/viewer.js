@@ -16,6 +16,7 @@ import {
   formatMeasuredValue,
   measurementInterval,
   measurementTickRange,
+  orthographicWorldUnitsPerPixel,
   paddedMeasurementRange,
   perspectiveWorldUnitsPerPixel
 } from './measurement-utils.mjs';
@@ -65,6 +66,9 @@ const viewer2dGrid = document.getElementById('viewer2dGrid');
 const svgPreview = document.getElementById('svgPreview');
 const fit3dButton = document.getElementById('fit3d');
 const axes3dButton = document.getElementById('axes3d');
+const viewPresets3d = document.getElementById('viewPresets3d');
+const planeViewButtons = document.querySelectorAll('[data-plane-view]');
+const projection3dButton = document.getElementById('projection3d');
 const fit2dButton = document.getElementById('fit2d');
 const consoleToggle = document.getElementById('consoleToggle');
 const compileConsole = document.getElementById('compileConsole');
@@ -152,7 +156,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf1f1ef);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+const perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+const orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10000);
+let camera = perspectiveCamera;
 camera.position.set(80, 80, 80);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -221,8 +227,11 @@ function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
     renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    perspectiveCamera.aspect = w / h;
+    perspectiveCamera.updateProjectionMatrix();
+    orthographicCamera.left = -w / h;
+    orthographicCamera.right = w / h;
+    orthographicCamera.updateProjectionMatrix();
     refresh3dMeasurements();
   }
   resize2d();
@@ -327,15 +336,24 @@ function measurementRanges(bounds) {
   ];
 }
 
+function worldUnitsPerPixel3d() {
+  if (camera.isOrthographicCamera) {
+    return orthographicWorldUnitsPerPixel(
+      camera.top - camera.bottom, camera.zoom, canvas.clientHeight
+    );
+  }
+  return perspectiveWorldUnitsPerPixel(
+    camera.position.distanceTo(controls.target), camera.fov, canvas.clientHeight
+  );
+}
+
 function rebuild3dMeasurements(force = false) {
   if (!measurementBounds || !axes3dVisible) {
     if (force || measurementGroup.children.length) disposeMeasurementLayer();
     measurementKey = '';
     return;
   }
-  const unitsPerPixel = perspectiveWorldUnitsPerPixel(
-    camera.position.distanceTo(controls.target), camera.fov, canvas.clientHeight
-  );
+  const unitsPerPixel = worldUnitsPerPixel3d();
   if (!(unitsPerPixel > 0)) return;
   const ranges = measurementRanges(measurementBounds);
   let step = measurementInterval(unitsPerPixel, 80);
@@ -396,9 +414,7 @@ function rebuild3dMeasurements(force = false) {
 function refresh3dMeasurements() {
   if (!axes3dVisible || !measurementBounds || canvas.hidden) return;
   rebuild3dMeasurements();
-  const unitsPerPixel = perspectiveWorldUnitsPerPixel(
-    camera.position.distanceTo(controls.target), camera.fov, canvas.clientHeight
-  );
+  const unitsPerPixel = worldUnitsPerPixel3d();
   if (!(unitsPerPixel > 0)) return;
   for (const sprite of measurementLabels) {
     const label = sprite.userData.measurementLabel;
@@ -600,6 +616,8 @@ function showPlaceholder(message) {
   canvas.hidden = true;
   fit3dButton.hidden = true;
   axes3dButton.hidden = true;
+  viewPresets3d.hidden = true;
+  projection3dButton.hidden = true;
   viewer2d.hidden = true;
   emptyPreview.textContent = message;
   emptyPreview.hidden = false;
@@ -615,6 +633,8 @@ function show3d(stl) {
   canvas.hidden = false;
   fit3dButton.hidden = false;
   axes3dButton.hidden = false;
+  viewPresets3d.hidden = false;
+  projection3dButton.hidden = false;
   clear2dPreview();
 
   clear3dPreview();
@@ -650,14 +670,20 @@ function parseStl(stl) {
   return geom;
 }
 
-function fit3dPreview() {
+function frame3dPreview(direction, up = new THREE.Vector3(0, 1, 0)) {
   const bounds = new THREE.Box3().setFromObject(modelGroup);
   if (bounds.isEmpty()) return;
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
   const radius = Math.max(20, size.length() / 2);
-  const direction = new THREE.Vector3(1, 1, 1).normalize();
-  camera.position.copy(center).addScaledVector(direction, radius * 2.6);
+  camera.up.copy(up);
+  camera.position.copy(center).addScaledVector(direction.clone().normalize(), radius * 2.6);
+  if (camera.isOrthographicCamera) {
+    const perspectiveHeight = 2 * radius * 2.6 * Math.tan(
+      THREE.MathUtils.degToRad(perspectiveCamera.fov) / 2
+    );
+    camera.zoom = (camera.top - camera.bottom) / perspectiveHeight;
+  }
   camera.near = Math.max(0.01, radius / 1000);
   camera.far = Math.max(10000, radius * 100);
   camera.updateProjectionMatrix();
@@ -667,8 +693,67 @@ function fit3dPreview() {
   refresh3dMeasurements();
 }
 
+function fit3dPreview() {
+  frame3dPreview(new THREE.Vector3(1, 1, 1));
+}
+
+// Camera directions are expressed in Three.js scene space. The preview group
+// rotates OpenSCAD's Z-up coordinates into Three.js's Y-up coordinates.
+const PLANE_VIEWS = {
+  X: { direction: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+  Y: { direction: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
+  Z: { direction: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, -1) }
+};
+
+function setPlaneView(plane) {
+  const view = PLANE_VIEWS[plane];
+  if (view) frame3dPreview(view.direction, view.up);
+}
+
+function setOrthographicProjection(enabled) {
+  const previousCamera = camera;
+  const direction = previousCamera.position.clone().sub(controls.target).normalize();
+  const previousHeight = previousCamera.isOrthographicCamera
+    ? (previousCamera.top - previousCamera.bottom) / previousCamera.zoom
+    : 2 * previousCamera.position.distanceTo(controls.target) * Math.tan(
+      THREE.MathUtils.degToRad(previousCamera.fov) / 2
+    );
+
+  camera = enabled ? orthographicCamera : perspectiveCamera;
+  camera.up.copy(previousCamera.up);
+  camera.near = previousCamera.near;
+  camera.far = previousCamera.far;
+  if (camera.isOrthographicCamera) {
+    camera.position.copy(previousCamera.position);
+    camera.zoom = (camera.top - camera.bottom) / previousHeight;
+  } else {
+    const distance = previousHeight /
+      (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    camera.position.copy(controls.target).addScaledVector(direction, distance);
+  }
+  camera.lookAt(controls.target);
+  camera.updateProjectionMatrix();
+  controls.object = camera;
+  controls.update();
+  projection3dButton.setAttribute('aria-pressed', String(enabled));
+  projection3dButton.textContent = enabled ? 'Perspective' : 'Isometric';
+  projection3dButton.title = enabled
+    ? 'Switch to perspective projection'
+    : 'Switch to isometric projection';
+  refresh3dMeasurements();
+}
+
+function toggle3dProjection() {
+  const enableIsometric = !camera.isOrthographicCamera;
+  setOrthographicProjection(enableIsometric);
+}
+
 fit3dButton.addEventListener('click', fit3dPreview);
 canvas.addEventListener('dblclick', fit3dPreview);
+for (const button of planeViewButtons) {
+  button.addEventListener('click', () => setPlaneView(button.dataset.planeView));
+}
+projection3dButton.addEventListener('click', toggle3dProjection);
 axes3dButton.addEventListener('click', () => {
   axes3dVisible = !axes3dVisible;
   measurementGroup.visible = axes3dVisible;
@@ -683,6 +768,8 @@ function showHybrid(parts) {
   canvas.hidden = false;
   fit3dButton.hidden = false;
   axes3dButton.hidden = false;
+  viewPresets3d.hidden = false;
+  projection3dButton.hidden = false;
   clear2dPreview();
   clear3dPreview();
 
@@ -939,6 +1026,8 @@ function show2d(svg) {
   canvas.hidden = true;
   fit3dButton.hidden = true;
   axes3dButton.hidden = true;
+  viewPresets3d.hidden = true;
+  projection3dButton.hidden = true;
   viewer2d.hidden = false;
   clear3dPreview();
 

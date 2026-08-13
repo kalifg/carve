@@ -235,6 +235,10 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
   .viewer-button:hover { background: var(--vscode-button-hoverBackground, #666); }
   .fit-button { right: 10px; }
   #axes3d { right: 58px; }
+  #viewPresets3d { position: absolute; z-index: 3; right: 143px; bottom: 10px;
+                   display: flex; gap: 3px; }
+  #viewPresets3d .viewer-button { position: static; min-width: 30px; padding-inline: 7px; }
+  #projection3d { right: 247px; }
   [hidden] { display: none !important; }
   #status.error { background: rgba(150,30,30,0.75); }
   #consoleToggle { left: 10px; }
@@ -253,6 +257,16 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
 <button id="consoleToggle" class="viewer-button" type="button" aria-expanded="false"
         title="Show or hide OpenSCAD compiler output">Compilation log</button>
 <button id="axes3d" class="viewer-button" type="button" aria-pressed="true" hidden>Hide axes</button>
+<div id="viewPresets3d" role="group" aria-label="3D plane views" hidden>
+  <button class="viewer-button" type="button" data-plane-view="X"
+          title="View perpendicular to the YZ plane">X</button>
+  <button class="viewer-button" type="button" data-plane-view="Y"
+          title="View perpendicular to the XZ plane">Y</button>
+  <button class="viewer-button" type="button" data-plane-view="Z"
+          title="View perpendicular to the XY plane">Z</button>
+</div>
+<button id="projection3d" class="viewer-button" type="button" aria-pressed="false" hidden
+        title="Switch to isometric projection">Isometric</button>
 <button id="fit3d" class="viewer-button fit-button" type="button" hidden
         title="Zoom to fit (double-click the canvas)">Fit</button>
 <div id="emptyPreview" hidden>No top-level geometry to preview</div>

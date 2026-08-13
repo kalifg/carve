@@ -8,6 +8,15 @@ export function perspectiveWorldUnitsPerPixel(distance, verticalFovDegrees, view
   return 2 * distance * Math.tan(verticalFov / 2) / viewportHeight;
 }
 
+export function orthographicWorldUnitsPerPixel(verticalSpan, zoom, viewportHeight) {
+  if (!Number.isFinite(verticalSpan) || verticalSpan <= 0 ||
+      !Number.isFinite(zoom) || zoom <= 0 ||
+      !Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+    return 0;
+  }
+  return verticalSpan / zoom / viewportHeight;
+}
+
 export function measurementInterval(worldUnitsPerPixel, targetPixels = 80) {
   if (!Number.isFinite(worldUnitsPerPixel) || worldUnitsPerPixel <= 0 ||
       !Number.isFinite(targetPixels) || targetPixels <= 0) {
