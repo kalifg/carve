@@ -49,6 +49,41 @@ async function render(code, format) {
   };
 }
 
+async function renderWithFiles(code, format, files) {
+  const stderr = [];
+  const instance = await OpenSCAD({
+    noInitialRun: true,
+    noExitRuntime: true,
+    wasmBinary,
+    locateFile: () => new URL('openscad.wasm', mediaUrl).href,
+    print: () => {},
+    printErr: (line) => stderr.push(line)
+  });
+
+  instance.FS.mkdirTree('/input');
+  for (const [name, data] of Object.entries(files)) {
+    instance.FS.writeFile(`/input/${name}`, data);
+  }
+  instance.FS.writeFile('/input/in.scad', code);
+  let rc;
+  try {
+    rc = instance.callMain([
+      '/input/in.scad',
+      '-o',
+      '/output',
+      `--export-format=${format}`
+    ]);
+  } catch (error) {
+    return { success: false, stderr: stderr.join('\n') || String(error) };
+  }
+  const success = rc === 0 || rc === undefined;
+  return {
+    success,
+    data: success ? instance.FS.readFile('/output') : undefined,
+    stderr: stderr.join('\n')
+  };
+}
+
 function binaryStlBounds(data) {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const facets = view.getUint32(80, true);
@@ -79,6 +114,44 @@ test('bundled OpenSCAD WASM exports 2D geometry as SVG', async () => {
 
   assert.equal(result.success, true, result.stderr);
   assert.match(new TextDecoder().decode(result.data), /<svg\b/);
+});
+
+test('bundled OpenSCAD WASM resolves an SVG beside the input SCAD file', async () => {
+  const svg = await readFile(new URL('../samples/ivy.svg', import.meta.url));
+  const result = await renderWithFiles('import("ivy.svg");', 'svg', { 'ivy.svg': svg });
+
+  assert.equal(result.success, true, result.stderr);
+  assert.match(new TextDecoder().decode(result.data), /<svg\b/);
+  assert.doesNotMatch(result.stderr, /Can't open import file/i);
+});
+
+test('bundled OpenSCAD WASM can run the full 2D preview pipeline for an imported SVG', async () => {
+  const svg = await readFile(new URL('../samples/ivy.svg', import.meta.url));
+  const files = { 'ivy.svg': svg };
+  const probe = await renderWithFiles('import("ivy.svg");', 'binstl', files);
+  assert.equal(probe.success, false);
+  assert.match(probe.stderr, /not a 3D object/i);
+
+  const csg = await renderWithFiles('import("ivy.svg");', 'csg', files);
+  assert.equal(csg.success, true, csg.stderr);
+  const branches = splitCsgForPreview(new TextDecoder().decode(csg.data));
+  assert.equal(branches.length, 1);
+
+  const flat = await renderWithFiles(wrap2dForPreview(branches[0].source), 'binstl', files);
+  assert.equal(flat.success, true, flat.stderr);
+  assert.ok(flat.data.byteLength > 84);
+});
+
+test('bundled OpenSCAD WASM extrudes the sample imported SVG', async () => {
+  const svg = await readFile(new URL('../samples/ivy.svg', import.meta.url));
+  const result = await renderWithFiles(
+    'linear_extrude(height = 10) import("ivy.svg");',
+    'binstl',
+    { 'ivy.svg': svg }
+  );
+
+  assert.equal(result.success, true, result.stderr);
+  assert.ok(result.data.byteLength > 84);
 });
 
 test('bundled OpenSCAD WASM reports a dimensional mismatch for 2D STL', async () => {

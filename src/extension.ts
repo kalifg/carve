@@ -11,6 +11,45 @@ let renderedDocument: vscode.TextDocument | undefined;
 let renderGeneration = 0;
 let sentFonts = new Set<string>();
 
+interface WebviewFile {
+  name: string;
+  data: string;
+}
+
+function referencedFiles(code: string): string[] {
+  const files = new Set<string>();
+  const call = /\b(?:import|surface)\s*\(([^;]*)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = call.exec(code))) {
+    const args = match[1];
+    const named = args.match(/\bfile\s*=\s*"((?:\\.|[^"\\])*)"/);
+    const positional = args.match(/^\s*"((?:\\.|[^"\\])*)"/);
+    const value = (named ?? positional)?.[1]
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
+    if (value) files.add(value);
+  }
+  return [...files];
+}
+
+async function filesForDocument(doc: vscode.TextDocument, code: string): Promise<WebviewFile[]> {
+  if (doc.uri.scheme === 'untitled') return [];
+  const files = await Promise.all(referencedFiles(code).map(async (name) => {
+    // Host absolute paths cannot be reproduced portably inside the WASM filesystem.
+    if (path.isAbsolute(name) || /^[a-z][a-z0-9+.-]*:/i.test(name)) return undefined;
+    const segments = name.replace(/\\/g, '/').split('/');
+    const uri = vscode.Uri.joinPath(doc.uri, '..', ...segments);
+    try {
+      const data = await vscode.workspace.fs.readFile(uri);
+      return { name: name.replace(/\\/g, '/'), data: Buffer.from(data).toString('base64') };
+    } catch {
+      // Let OpenSCAD report the missing file with the source location.
+      return undefined;
+    }
+  }));
+  return files.filter((file): file is WebviewFile => !!file);
+}
+
 export function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(
     vscode.commands.registerCommand('carve.openPreview', () => openPreview(ctx)),
@@ -119,7 +158,10 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
   renderedDocument = doc;
   const cfg = vscode.workspace.getConfiguration('carve', doc.uri);
   const configuredFonts = cfg.get<string[]>('fontFiles', []);
-  const availableFonts = await fontsForDocument(code, configuredFonts);
+  const [availableFonts, files] = await Promise.all([
+    fontsForDocument(code, configuredFonts),
+    filesForDocument(doc, code)
+  ]);
   if (!currentPanel || generation !== renderGeneration) return;
   const fonts = availableFonts.filter((font) => {
     if (sentFonts.has(font.name)) return false;
@@ -132,6 +174,7 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
     fileName: path.basename(doc.fileName),
     format: 'binstl',
     fonts,
+    files,
     force
   });
 }
@@ -177,6 +220,7 @@ async function exportStl() {
     code: editor.document.getText(),
     fileName: path.basename(editor.document.fileName),
     format: fmt,
+    files: await filesForDocument(editor.document, editor.document.getText()),
     fonts: (await fontsForDocument(
       editor.document.getText(),
       cfg.get<string[]>('fontFiles', [])
@@ -298,6 +342,21 @@ function renderWebviewHtml(webview: vscode.Webview, extUri: vscode.Uri): string 
 <section id="compileConsole" aria-label="OpenSCAD compilation log" hidden>
   <pre id="compileLog">No compiler output yet.</pre>
 </section>
+<script nonce="${nonce}">
+  const bootstrapStatus = document.getElementById('status');
+  window.addEventListener('error', (event) => {
+    if (!bootstrapStatus.textContent.startsWith('Loading')) return;
+    const source = event.target?.src ? '\n' + event.target.src : '';
+    bootstrapStatus.textContent = 'Failed to start Carve: ' +
+      (event.message || 'module load error') + source;
+    bootstrapStatus.classList.add('error');
+  }, true);
+  window.setTimeout(() => {
+    if (!bootstrapStatus.textContent.startsWith('Loading')) return;
+    bootstrapStatus.textContent = 'Carve startup timed out while loading its preview module.';
+    bootstrapStatus.classList.add('error');
+  }, 10000);
+</script>
 <script type="importmap" nonce="${nonce}">
 {
   "imports": {

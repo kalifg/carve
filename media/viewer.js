@@ -446,6 +446,26 @@ controls.addEventListener('change', refresh3dMeasurements);
 // --- Render pipeline ------------------------------------------------------
 let pending = 0;
 let moduleUsed = false; // true once we've called callMain on `Module`
+let documentFiles = [];
+
+function registerDocumentFiles(files) {
+  documentFiles = Array.isArray(files) ? files : [];
+}
+
+function installDocumentFiles(M) {
+  M.FS.mkdirTree('/input');
+  for (const file of documentFiles) {
+    if (!file?.name || !file?.data) continue;
+    const relativeName = String(file.name).replaceAll('\\', '/').replace(/^\/+/, '');
+    const virtualPath = `/input/${relativeName}`;
+    const slash = virtualPath.lastIndexOf('/');
+    if (slash > 0) M.FS.mkdirTree(virtualPath.slice(0, slash));
+    const binary = atob(file.data);
+    const data = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    M.FS.writeFile(virtualPath, data);
+  }
+}
+
 async function runOpenscad(code, format) {
   // OpenSCAD's main() leaves C++ static state behind that prevents a clean
   // second call. Re-instantiate the module between renders.
@@ -453,15 +473,16 @@ async function runOpenscad(code, format) {
     Module = await freshModule();
   }
   installFonts(Module);
+  installDocumentFiles(Module);
   moduleUsed = true;
   capture.reset();
-  try { Module.FS.writeFile('/in.scad', code); } catch (e) {
+  try { Module.FS.writeFile('/input/in.scad', code); } catch (e) {
     const stderr = 'FS.writeFile failed: ' + e.message;
     return { success: false, stderr, log: stderr };
   }
   let rc;
   try {
-    rc = Module.callMain(['/in.scad', '-o', '/out', '--export-format=' + format]);
+    rc = Module.callMain(['/input/in.scad', '-o', '/out', '--export-format=' + format]);
   } catch (e) {
     const stderr = cleanStderr(capture.stderr()) || String(e);
     return { success: false, stderr, log: capturedLog() || stderr };
@@ -860,6 +881,7 @@ async function doExport(code, format) {
 window.addEventListener('message', (ev) => {
   const msg = ev.data;
   registerFonts(msg?.fonts);
+  registerDocumentFiles(msg?.files);
   if (msg?.type === 'render') renderToScene(msg.code);
   else if (msg?.type === 'export') doExport(msg.code, msg.format || 'binstl');
 });

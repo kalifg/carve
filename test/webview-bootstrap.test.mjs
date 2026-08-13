@@ -28,6 +28,11 @@ test('every bare viewer import is represented in the webview import map', () => 
   }
 });
 
+test('module bootstrap failures replace the indefinite loading state', () => {
+  assert.match(extensionSource, /Failed to start Carve:/);
+  assert.match(extensionSource, /Carve startup timed out while loading its preview module/);
+});
+
 test('pure 2D previews use the 3D scene pipeline instead of SVG', () => {
   assert.match(viewerSource, /if \(\/not a 3D object\/i\.test\(result\.stderr\)\)/);
   assert.match(viewerSource, /const sceneResult = await runCsgScenePreview\(code\)/);
@@ -50,6 +55,16 @@ test('host fonts are installed into every OpenSCAD virtual filesystem', () => {
   assert.match(viewerSource, /installFonts\(Module\)/);
   assert.match(viewerSource, /installFonts\(M\)/);
   assert.match(viewerSource, /registerFonts\(msg\?\.fonts\)/);
+});
+
+test('relative import files are copied beside the SCAD file in WASM', () => {
+  assert.match(extensionSource, /function referencedFiles\(/);
+  assert.match(extensionSource, /filesForDocument\(doc, code\)/);
+  assert.match(extensionSource, /filesForDocument\(editor\.document, editor\.document\.getText\(\)\)/);
+  assert.match(viewerSource, /function installDocumentFiles\(M\)/);
+  assert.match(viewerSource, /M\.FS\.writeFile\(virtualPath, data\)/);
+  assert.match(viewerSource, /Module\.FS\.writeFile\('\/input\/in\.scad', code\)/);
+  assert.match(viewerSource, /installDocumentFiles\(Module\)/);
 });
 
 test('the preview exposes captured compiler output in a collapsible console', () => {
