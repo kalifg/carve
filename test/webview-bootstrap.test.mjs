@@ -102,10 +102,10 @@ test('the 3D viewer toggles between perspective and isometric projection', () =>
   assert.doesNotMatch(toggleBody, /fit3dPreview/);
 });
 
-test('the 3D viewer uses a light studio background and balanced lighting', () => {
+test('the 3D viewer uses the OpenSCAD light background and balanced lighting', () => {
   assert.match(viewerSource, /renderer\.outputColorSpace = THREE\.SRGBColorSpace/);
   assert.match(viewerSource, /renderer\.toneMapping = THREE\.ACESFilmicToneMapping/);
-  assert.match(viewerSource, /scene\.background = new THREE\.Color\(0xf1f1ef\)/);
+  assert.match(viewerSource, /scene\.background = new THREE\.Color\(0xffffe5\)/);
   assert.match(viewerSource, /new THREE\.HemisphereLight/);
   assert.equal(viewerSource.match(/new THREE\.DirectionalLight/g)?.length, 3);
 });

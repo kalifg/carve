@@ -178,7 +178,9 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xf1f1ef);
+// Match OpenSCAD's classic light viewport. The warm ivory keeps white parts
+// distinct from the canvas without changing their material color.
+scene.background = new THREE.Color(0xffffe5);
 const perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
 const orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10000);
 let camera = perspectiveCamera;
