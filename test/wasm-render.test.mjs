@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  groupCsgPreviewBranches,
   splitCsgForPreview,
   splitTopLevelCsg,
   wrap2dForPreview
@@ -303,8 +304,10 @@ test('normalized CSG preserves evaluated colors through nested groups and transf
   assert.equal(parts.filter((part) => part.color).length, 1);
   assert.deepEqual(parts.find((part) => part.color).color, { r: 1, g: 0, b: 0, a: 0.4 });
 
-  for (const part of parts) {
-    const stlResult = await render(part.source, 'binstl');
+  const groups = groupCsgPreviewBranches(parts);
+  assert.equal(groups.length, 2);
+  for (const group of groups) {
+    const stlResult = await render(group.source, 'binstl');
     assert.equal(stlResult.success, true, stlResult.stderr);
   }
 });

@@ -2,12 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  groupCsgPreviewBranches,
   mayContainColor,
   mayContainMixedGeometry,
   splitCsgForPreview,
   splitTopLevelCsg,
   wrap2dForPreview
 } from '../media/csg-preview.mjs';
+
+test('preview branches with the same color are grouped without changing their order', () => {
+  const red = { r: 1, g: 0, b: 0, a: 1 };
+  const blue = { r: 0, g: 0, b: 1, a: 1 };
+  const groups = groupCsgPreviewBranches([
+    { source: 'cube(1);', color: red },
+    { source: 'sphere(1);' },
+    { source: 'translate([2, 0, 0]) cube(1);', color: red },
+    { source: 'cylinder(1);', color: blue },
+    { source: 'translate([2, 0, 0]) sphere(1);' }
+  ]);
+
+  assert.equal(groups.length, 3);
+  assert.deepEqual(groups.map((group) => group.color), [red, undefined, blue]);
+  assert.deepEqual(groups.map((group) => group.branches.length), [2, 2, 1]);
+  assert.equal(groups[0].source, 'cube(1);\ntranslate([2, 0, 0]) cube(1);');
+  assert.equal(groups[1].source, 'sphere(1);\ntranslate([2, 0, 0]) sphere(1);');
+});
 
 test('recognizes color calls while ignoring comments and strings', () => {
   assert.equal(mayContainColor('color("red") cube(10);'), true);

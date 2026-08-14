@@ -42,6 +42,18 @@ test('pure 2D previews use the 3D scene pipeline instead of SVG', () => {
   assert.doesNotMatch(extensionSource, /carve-preview-format/);
 });
 
+test('colored and likely mixed previews try the CSG scene route before exact STL', () => {
+  const runPreview = viewerSource.match(
+    /async function runPreview\(code\) \{([\s\S]*?)\n\}/
+  )?.[1];
+  assert.ok(runPreview);
+  assert.ok(
+    runPreview.indexOf('enhancedScenePreview(code, PREVIEW_3D_FORMAT)') <
+    runPreview.indexOf('runOpenscad(code, PREVIEW_3D_FORMAT)')
+  );
+  assert.match(viewerSource, /groupCsgPreviewBranches\(previewBranches\)/);
+});
+
 test('every WASM instance receives output hooks during construction', () => {
   assert.equal(viewerSource.match(/print: capture\.print,/g)?.length, 2);
   assert.equal(viewerSource.match(/printErr: capture\.printErr/g)?.length, 2);

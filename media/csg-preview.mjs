@@ -139,6 +139,26 @@ export function splitCsgForPreview(source) {
   return splitTopLevelCsg(source).flatMap((root) => splitPreviewBranch(root));
 }
 
+export function groupCsgPreviewBranches(branches) {
+  const groups = new Map();
+  for (const branch of branches) {
+    const color = branch.color;
+    const key = color
+      ? `${color.r},${color.g},${color.b},${color.a}`
+      : 'default';
+    let group = groups.get(key);
+    if (!group) {
+      group = { source: '', color, branches: [] };
+      groups.set(key, group);
+    }
+    group.branches.push(branch);
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    source: group.branches.map((branch) => branch.source).join('\n')
+  }));
+}
+
 function splitPreviewBranch(root, inheritedColor) {
   const wrapper = peelTransparentWrapper(root);
   if (!wrapper) return [{ source: root.trim(), color: inheritedColor }];

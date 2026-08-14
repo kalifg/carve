@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import {
+  groupCsgPreviewBranches,
   mayContainColor,
   mayContainMixedGeometry,
   splitCsgForPreview,
@@ -517,12 +518,13 @@ async function runCsgScenePreview(code, requireMixedDimensions = false) {
     return { success: false, stderr: String(error), format: PREVIEW_SCENE_FORMAT };
   }
 
-  const parts = [];
-  for (const branch of previewBranches) {
+  async function renderBranch(branch) {
     const stlResult = await runOpenscad(branch.source, PREVIEW_3D_FORMAT);
     if (stlResult.success) {
-      parts.push({ dimension: 3, data: stlResult.data, color: branch.color });
-      continue;
+      return {
+        success: true,
+        parts: [{ dimension: 3, data: stlResult.data, color: branch.color }]
+      };
     }
     if (isMixedDimensions(stlResult.stderr)) {
       return {
@@ -534,11 +536,12 @@ async function runCsgScenePreview(code, requireMixedDimensions = false) {
           '',
           stlResult.stderr
         ].join('\n'),
-        format: PREVIEW_HYBRID_FORMAT
+        format: PREVIEW_HYBRID_FORMAT,
+        parts: []
       };
     }
     if (!isEmptyTopLevel(stlResult.stderr) && !/not a 3D object/i.test(stlResult.stderr)) {
-      return { ...stlResult, format: PREVIEW_SCENE_FORMAT };
+      return { ...stlResult, format: PREVIEW_SCENE_FORMAT, parts: [] };
     }
 
     const flatResult = await runOpenscad(
@@ -546,10 +549,26 @@ async function runCsgScenePreview(code, requireMixedDimensions = false) {
       PREVIEW_3D_FORMAT
     );
     if (!flatResult.success) {
-      if (isEmptyTopLevel(flatResult.stderr)) continue;
-      return { ...flatResult, format: PREVIEW_SCENE_FORMAT };
+      if (isEmptyTopLevel(flatResult.stderr)) return { success: true, parts: [] };
+      return { ...flatResult, format: PREVIEW_SCENE_FORMAT, parts: [] };
     }
-    parts.push({ dimension: 2, data: flatResult.data, color: branch.color });
+    return {
+      success: true,
+      parts: [{ dimension: 2, data: flatResult.data, color: branch.color }]
+    };
+  }
+
+  const parts = [];
+  for (const group of groupCsgPreviewBranches(previewBranches)) {
+    let branchResults = [await renderBranch(group)];
+    if (!branchResults[0].success && group.branches.length > 1) {
+      branchResults = [];
+      for (const branch of group.branches) branchResults.push(await renderBranch(branch));
+    }
+    for (const branchResult of branchResults) {
+      if (!branchResult.success) return branchResult;
+      parts.push(...branchResult.parts);
+    }
   }
 
   const dimensions = new Set(parts.map((part) => part.dimension));
@@ -565,7 +584,8 @@ async function runCsgScenePreview(code, requireMixedDimensions = false) {
     success: true,
     parts,
     hasColor: parts.some((part) => part.color),
-    stderr: '',
+    stderr: csgResult.stderr,
+    log: csgResult.log,
     format: isHybrid ? PREVIEW_HYBRID_FORMAT : PREVIEW_SCENE_FORMAT
   };
 }
@@ -588,17 +608,17 @@ async function enhancedScenePreview(code, format) {
 }
 
 async function runPreview(code) {
+  // Color and likely mixed-dimension sources need normalized CSG in order to
+  // preserve their scene structure. Try that route first so a successful
+  // scene preview does not pay for a complete STL that would be discarded.
+  const sceneResult = await enhancedScenePreview(code, PREVIEW_3D_FORMAT);
+  if (sceneResult) return sceneResult;
+
   const result = await runOpenscad(code, PREVIEW_3D_FORMAT);
   if (isMixedDimensions(result.stderr)) {
     return { ...await runHybridPreview(code), log: result.log };
   }
   if (result.success) {
-    // Some OpenSCAD builds successfully export only the 3D portion when a
-    // transformed 2D root collapses edge-on (for example rotate([0,90,0])
-    // circle(...)). In that case there is no mixed-dimension warning to
-    // trigger the normal fallback, so proactively inspect likely mixed files.
-    const sceneResult = await enhancedScenePreview(code, PREVIEW_3D_FORMAT);
-    if (sceneResult) return { ...sceneResult, stderr: result.stderr, log: result.log };
     return { ...result, format: PREVIEW_3D_FORMAT };
   }
   if (isEmptyTopLevel(result.stderr)) {
