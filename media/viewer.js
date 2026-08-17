@@ -21,6 +21,7 @@ import {
   paddedMeasurementRange,
   perspectiveWorldUnitsPerPixel
 } from './measurement-utils.mjs';
+import { orthographicFitZoom, perspectiveFitDistance } from './view-fit.mjs';
 import { parseOpenScadWrl } from './wrl-preview.mjs';
 
 // Keep the preview-format selection in this entry module. VS Code webviews
@@ -756,19 +757,51 @@ function parseStl(stl) {
   return geom;
 }
 
+const FIT_PADDING_PIXELS = 16;
+
+function fitViewportInsets() {
+  const canvasRect = canvas.getBoundingClientRect();
+  let top = FIT_PADDING_PIXELS;
+  let bottom = FIT_PADDING_PIXELS;
+  const statusRect = $status.getBoundingClientRect();
+  if (statusRect.height > 0) {
+    top = Math.max(top, statusRect.bottom - canvasRect.top + 8);
+  }
+  for (const element of [
+    consoleToggle, axes3dButton, viewPresets3d, projection3dButton, fit3dButton
+  ]) {
+    if (element.hidden) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.height > 0) {
+      bottom = Math.max(bottom, canvasRect.bottom - rect.top + 8);
+    }
+  }
+  return { top, right: FIT_PADDING_PIXELS, bottom, left: FIT_PADDING_PIXELS };
+}
+
 function frame3dPreview(direction, up = new THREE.Vector3(0, 1, 0)) {
   const bounds = new THREE.Box3().setFromObject(modelGroup);
   if (bounds.isEmpty()) return;
   const center = bounds.getCenter(new THREE.Vector3());
-  const size = bounds.getSize(new THREE.Vector3());
-  const radius = Math.max(20, size.length() / 2);
+  const halfSize = bounds.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+  const radius = Math.max(1, halfSize.length());
+  const normalizedDirection = direction.clone().normalize();
+  const fit = {
+    halfSize,
+    direction: normalizedDirection,
+    up,
+    viewportWidth: canvas.clientWidth,
+    viewportHeight: canvas.clientHeight,
+    insets: fitViewportInsets()
+  };
   camera.up.copy(up);
-  camera.position.copy(center).addScaledVector(direction.clone().normalize(), radius * 2.6);
+  const distance = Math.max(radius * 1.05, perspectiveFitDistance({
+    ...fit,
+    verticalFovDegrees: perspectiveCamera.fov
+  }));
+  camera.position.copy(center).addScaledVector(normalizedDirection, distance);
   if (camera.isOrthographicCamera) {
-    const perspectiveHeight = 2 * radius * 2.6 * Math.tan(
-      THREE.MathUtils.degToRad(perspectiveCamera.fov) / 2
-    );
-    camera.zoom = (camera.top - camera.bottom) / perspectiveHeight;
+    camera.zoom = orthographicFitZoom(fit);
   }
   camera.near = Math.max(0.01, radius / 1000);
   camera.far = Math.max(10000, radius * 100);
