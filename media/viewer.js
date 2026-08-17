@@ -21,6 +21,7 @@ import {
   paddedMeasurementRange,
   perspectiveWorldUnitsPerPixel
 } from './measurement-utils.mjs';
+import { parseOpenScadWrl } from './wrl-preview.mjs';
 
 // Keep the preview-format selection in this entry module. VS Code webviews
 // resolve the import map before executing any module code, so an unresolved
@@ -29,6 +30,7 @@ const PREVIEW_3D_FORMAT = 'binstl';
 const PREVIEW_CSG_FORMAT = 'csg';
 const PREVIEW_HYBRID_FORMAT = 'hybrid';
 const PREVIEW_SCENE_FORMAT = 'scene';
+const PREVIEW_COLOR_FORMAT = 'wrl';
 const HYBRID_2D_THICKNESS = 0.01;
 
 function cleanStderr(stderr) {
@@ -608,6 +610,21 @@ async function enhancedScenePreview(code, format) {
 }
 
 async function runPreview(code) {
+  // WRL is the only color-capable mesh export in the bundled OpenSCAD build.
+  // It preserves final Boolean geometry and per-face colors in one evaluation,
+  // avoiding a CSG export followed by one complete STL render per material.
+  if (mayContainColor(code)) {
+    const colorResult = await runOpenscad(code, PREVIEW_COLOR_FORMAT);
+    if (colorResult.success) {
+      try {
+        const parsed = parseOpenScadWrl(new TextDecoder().decode(colorResult.data));
+        return { ...colorResult, parsed, format: PREVIEW_COLOR_FORMAT };
+      } catch {
+        // Keep the existing CSG/STL route as a compatibility fallback if a
+        // future OpenSCAD build changes its WRL dialect.
+      }
+    }
+  }
   // Color and likely mixed-dimension sources need normalized CSG in order to
   // preserve their scene structure. Try that route first so a successful
   // scene preview does not pay for a complete STL that would be discarded.
@@ -679,6 +696,40 @@ function show3d(stl) {
   if (!has3dViewpoint) fit3dPreview();
   else refresh3dMeasurements();
   return geom.attributes.position.count / 3;
+}
+
+function showWrl(parsed) {
+  emptyPreview.hidden = true;
+  canvas.hidden = false;
+  fit3dButton.hidden = false;
+  axes3dButton.hidden = false;
+  viewPresets3d.hidden = false;
+  projection3dButton.hidden = false;
+  clear3dPreview();
+
+  const linearColors = parsed.colors.slice();
+  const color = new THREE.Color();
+  for (let offset = 0; offset < linearColors.length; offset += 3) {
+    color.setRGB(
+      linearColors[offset], linearColors[offset + 1], linearColors[offset + 2],
+      THREE.SRGBColorSpace
+    );
+    linearColors[offset] = color.r;
+    linearColors[offset + 1] = color.g;
+    linearColors[offset + 2] = color.b;
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(linearColors, 3));
+  geom.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true, metalness: 0, roughness: 0.72, flatShading: true
+  });
+  modelGroup.add(new THREE.Mesh(geom, material));
+  updateMeasurementBounds();
+  if (!has3dViewpoint) fit3dPreview();
+  else refresh3dMeasurements();
+  return parsed;
 }
 
 function materialForPart(part) {
@@ -851,6 +902,10 @@ async function renderToScene(code) {
     if (result.empty) {
       showEmpty();
       setStatus(`Empty \u00b7 ${ms} ms \u00b7 no top-level geometry`);
+    } else if (result.format === PREVIEW_COLOR_FORMAT) {
+      const summary = showWrl(result.parsed);
+      setStatus(`OK \u00b7 ${ms} ms \u00b7 3D color scene \u00b7 ` +
+        `${summary.materialCount} materials \u00b7 ${summary.triangleCount.toLocaleString()} triangles`);
     } else if (result.format === PREVIEW_HYBRID_FORMAT) {
       const summary = showHybrid(result.parts);
       setStatus(

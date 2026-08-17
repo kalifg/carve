@@ -42,11 +42,15 @@ test('pure 2D previews use the 3D scene pipeline instead of SVG', () => {
   assert.doesNotMatch(extensionSource, /carve-preview-format/);
 });
 
-test('colored and likely mixed previews try the CSG scene route before exact STL', () => {
+test('colored previews use one WRL render before the CSG/STL fallback', () => {
   const runPreview = viewerSource.match(
     /async function runPreview\(code\) \{([\s\S]*?)\n\}/
   )?.[1];
   assert.ok(runPreview);
+  assert.ok(
+    runPreview.indexOf('runOpenscad(code, PREVIEW_COLOR_FORMAT)') <
+    runPreview.indexOf('enhancedScenePreview(code, PREVIEW_3D_FORMAT)')
+  );
   assert.ok(
     runPreview.indexOf('enhancedScenePreview(code, PREVIEW_3D_FORMAT)') <
     runPreview.indexOf('runOpenscad(code, PREVIEW_3D_FORMAT)')
@@ -98,7 +102,7 @@ test('the webview has a single Three.js viewer for both 2D and 3D geometry', () 
 
 test('the 3D viewer preserves its viewpoint between renders and supports refitting', () => {
   assert.match(viewerSource, /let has3dViewpoint = false/);
-  assert.equal(viewerSource.match(/if \(!has3dViewpoint\) fit3dPreview\(\)/g)?.length, 2);
+  assert.equal(viewerSource.match(/if \(!has3dViewpoint\) fit3dPreview\(\)/g)?.length, 3);
   assert.match(viewerSource, /fit3dButton\.addEventListener\('click', fit3dPreview\)/);
   assert.match(viewerSource, /canvas\.addEventListener\('dblclick', fit3dPreview\)/);
   assert.match(extensionSource, /id="fit3d"/);

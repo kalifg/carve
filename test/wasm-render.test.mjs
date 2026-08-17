@@ -8,6 +8,7 @@ import {
   splitTopLevelCsg,
   wrap2dForPreview
 } from '../media/csg-preview.mjs';
+import { parseOpenScadWrl } from '../media/wrl-preview.mjs';
 
 const mediaUrl = new URL('../media/', import.meta.url);
 const loaderSource = await readFile(new URL('openscad.js', mediaUrl), 'utf8');
@@ -284,6 +285,23 @@ test('bundled OpenSCAD WASM still exports 3D geometry as binary STL', async () =
 
   assert.equal(result.success, true, result.stderr);
   assert.ok(result.data.byteLength > 84);
+});
+
+test('bundled OpenSCAD WASM exports final geometry and face colors in one WRL', async () => {
+  const result = await render(
+    'color("red") cube(10); color("blue") translate([15, 0, 0]) cube(10);',
+    'wrl'
+  );
+
+  assert.equal(result.success, true, result.stderr);
+  const parsed = parseOpenScadWrl(new TextDecoder().decode(result.data));
+  assert.ok(parsed.triangleCount >= 24);
+  assert.equal(parsed.materialCount, 2);
+  const colors = new Set();
+  for (let offset = 0; offset < parsed.colors.length; offset += 3) {
+    colors.add([...parsed.colors.slice(offset, offset + 3)].join(','));
+  }
+  assert.deepEqual(colors, new Set(['1,0,0', '0,0,1']));
 });
 
 test('normalized CSG preserves evaluated colors through nested groups and transforms', async () => {
