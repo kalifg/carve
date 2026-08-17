@@ -162,3 +162,40 @@ test('finds evaluated colors nested inside union containers', () => {
   ]);
   assert.ok(parts.every((part) => part.source.startsWith('union()')));
 });
+
+test('preserves first-operand materials through nested Boolean operations', () => {
+  const source = `
+    group() {
+      color([1, 1, 1, 1]) { difference() { cube(10); sphere(2); } }
+      multmatrix([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 10], [0, 0, 0, 1]]) {
+        difference() {
+          union() {
+            color([1, 0.84, 0, 1]) { cube(10); }
+            color([1, 0, 0, 1]) { cylinder(h = 10, r = 2); }
+          }
+          color([0, 0.5, 0, 1]) { sphere(3); }
+        }
+        intersection() {
+          color([0, 0.5, 0, 1]) { sphere(6); }
+          union() {
+            color([1, 0.84, 0, 1]) { cube(10); }
+            color([1, 0, 0, 1]) { cylinder(h = 10, r = 2); }
+          }
+        }
+      }
+    }
+  `;
+
+  const parts = splitCsgForPreview(source);
+
+  assert.equal(parts.length, 4);
+  assert.deepEqual(parts.map((part) => part.color), [
+    { r: 1, g: 1, b: 1, a: 1 },
+    { r: 1, g: 0.84, b: 0, a: 1 },
+    { r: 1, g: 0, b: 0, a: 1 },
+    { r: 0, g: 0.5, b: 0, a: 1 }
+  ]);
+  assert.match(parts[1].source, /difference\(\)/);
+  assert.match(parts[1].source, /color\(\[0, 0\.5, 0, 1\]\) \{ sphere\(3\); \}/);
+  assert.match(parts[3].source, /intersection\(\)/);
+});

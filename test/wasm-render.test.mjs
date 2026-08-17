@@ -334,3 +334,41 @@ test('normalized CSG preserves colors nested inside a top-level union', async ()
     assert.equal(stlResult.success, true, stlResult.stderr);
   }
 });
+
+test('normalized CSG keeps four materials across difference and intersection', async () => {
+  const code = `
+    module decorated() {
+      union() {
+        color("gold") difference() { cube([20, 20, 4]); cube([4, 4, 4]); }
+        color("red") translate([6, 6, 0]) cube([8, 8, 4]);
+      }
+    }
+    color("white") translate([-4, 0, -2]) cube([4, 20, 2]);
+    difference() {
+      decorated();
+      color("green") translate([2, 2, 2]) sphere(3);
+    }
+    intersection() {
+      color("green") translate([10, 10, 3]) sphere(6);
+      decorated();
+    }
+  `;
+  const csgResult = await render(code, 'csg');
+
+  assert.equal(csgResult.success, true, csgResult.stderr);
+  const groups = groupCsgPreviewBranches(
+    splitCsgForPreview(new TextDecoder().decode(csgResult.data))
+  );
+  assert.deepEqual(groups.map((group) => group.color), [
+    { r: 1, g: 1, b: 1, a: 1 },
+    { r: 1, g: 0.843137, b: 0, a: 1 },
+    { r: 1, g: 0, b: 0, a: 1 },
+    { r: 0, g: 0.501961, b: 0, a: 1 }
+  ]);
+
+  for (const group of groups) {
+    const stlResult = await render(group.source, 'binstl');
+    assert.equal(stlResult.success, true, stlResult.stderr);
+    assert.ok(stlResult.data.byteLength > 84);
+  }
+});

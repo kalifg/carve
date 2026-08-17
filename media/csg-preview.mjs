@@ -160,13 +160,28 @@ export function groupCsgPreviewBranches(branches) {
 }
 
 function splitPreviewBranch(root, inheritedColor) {
-  const wrapper = peelTransparentWrapper(root);
+  const wrapper = peelCsgWrapper(root);
   if (!wrapper) return [{ source: root.trim(), color: inheritedColor }];
 
   const color = wrapper.name === 'color'
     ? parseNormalizedColor(wrapper.header) ?? inheritedColor
     : inheritedColor;
   const children = splitTopLevelCsg(wrapper.body);
+
+  // A difference and an intersection take their presentation attributes from
+  // the first operand. Descendant colors in the other operands describe tools
+  // used by the Boolean, not visible material. Partition the first operand and
+  // replay the complete Boolean around every partition so its geometry remains
+  // clipped exactly as it was in the normalized CSG scene.
+  if (wrapper.name === 'difference' || wrapper.name === 'intersection') {
+    if (children.length === 0) return [];
+    const operands = children.slice(1).join('\n');
+    return splitPreviewBranch(children[0], color).map((part) => ({
+      ...part,
+      source: `${wrapper.header}\n${part.source}${operands ? `\n${operands}` : ''}\n}`
+    }));
+  }
+
   return children.flatMap((child) =>
     splitPreviewBranch(child, color).map((part) => ({
       ...part,
@@ -214,7 +229,15 @@ function peelTransparentWrapper(root) {
   // Normalized CSG commonly wraps a whole colored assembly in union()/group().
   // Splitting those containers into separately rendered meshes preserves their
   // geometry while allowing descendant color() nodes to become materials.
-  const match = root.match(/^([#%!*]\s*)?(multmatrix|color|group|union)\s*\(/);
+  return peelWrapper(root, 'multmatrix|color|group|union');
+}
+
+function peelCsgWrapper(root) {
+  return peelWrapper(root, 'multmatrix|color|group|union|difference|intersection');
+}
+
+function peelWrapper(root, names) {
+  const match = root.match(new RegExp(`^([#%!*]\\s*)?(${names})\\s*\\(`));
   if (!match) return undefined;
 
   let quote = null;
