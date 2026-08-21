@@ -64,6 +64,22 @@
           "maximum": 5000,
           "description": "Debounce delay (ms) before re-rendering after a change."
         },
+        "carve.renderBackend": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "native", "wasm"],
+          "enumDescriptions": [
+            "Use native OpenSCAD when available, otherwise use bundled WebAssembly.",
+            "Prefer native OpenSCAD, falling back to WebAssembly for unsupported scenes.",
+            "Always use bundled WebAssembly."
+          ],
+          "description": "Renderer used for live previews. Native OpenSCAD is substantially faster for complex models."
+        },
+        "carve.nativeOpenSCADPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the native OpenSCAD executable. Leave empty to detect it automatically."
+        },
         "carve.exportFormat": {
           "type": "string",
           "default": "binstl",

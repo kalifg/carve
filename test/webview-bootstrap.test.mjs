@@ -58,6 +58,17 @@ test('colored previews use one WRL render before the CSG/STL fallback', () => {
   assert.match(viewerSource, /groupCsgPreviewBranches\(previewBranches\)/);
 });
 
+test('native OpenSCAD previews bypass WASM and retain a WASM fallback', () => {
+  assert.match(extensionSource, /findNativeOpenScad/);
+  assert.match(extensionSource, /renderNativeWrl/);
+  assert.match(extensionSource, /type: 'renderStart'/);
+  assert.match(extensionSource, /type: 'nativeRender'/);
+  assert.match(extensionSource, /backend !== 'wasm'/);
+  assert.match(viewerSource, /function showNativeRender\(msg\)/);
+  assert.match(viewerSource, /Native OpenSCAD/);
+  assert.match(viewerSource, /else if \(msg\?\.type === 'render'\) renderToScene/);
+});
+
 test('every WASM instance receives output hooks during construction', () => {
   assert.equal(viewerSource.match(/print: capture\.print,/g)?.length, 2);
   assert.equal(viewerSource.match(/printErr: capture\.printErr/g)?.length, 2);

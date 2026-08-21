@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { fontsForDocument } from './fonts';
+// This module stays plain ESM so its process orchestration can be unit-tested
+// without loading the VS Code runtime.
+// @ts-ignore
+import { findNativeOpenScad, renderNativeWrl } from './native-openscad.mjs';
 
 const VIEW_TYPE = 'carve.preview';
 const DIAG = vscode.languages.createDiagnosticCollection('carve');
@@ -10,6 +14,9 @@ let renderTimer: NodeJS.Timeout | undefined;
 let renderedDocument: vscode.TextDocument | undefined;
 let renderGeneration = 0;
 let sentFonts = new Set<string>();
+let nativeRenderAbort: AbortController | undefined;
+let nativeExecutableKey = '';
+let nativeExecutablePromise: Promise<string | undefined> | undefined;
 
 interface WebviewFile {
   name: string;
@@ -63,6 +70,7 @@ export function activate(ctx: vscode.ExtensionContext) {
 
 export function deactivate() {
   if (renderTimer) clearTimeout(renderTimer);
+  nativeRenderAbort?.abort();
   DIAG.dispose();
 }
 
@@ -152,11 +160,50 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
   if (!currentPanel) return;
   const generation = ++renderGeneration;
   const code = doc.getText();
+  nativeRenderAbort?.abort();
+  nativeRenderAbort = undefined;
   if (renderedDocument && renderedDocument.uri.toString() !== doc.uri.toString()) {
     DIAG.delete(renderedDocument.uri);
   }
   renderedDocument = doc;
   const cfg = vscode.workspace.getConfiguration('carve', doc.uri);
+  currentPanel.webview.postMessage({ type: 'renderStart', generation });
+
+  const backend = cfg.get<string>('renderBackend', 'auto');
+  if (backend !== 'wasm') {
+    const configuredPath = cfg.get<string>('nativeOpenSCADPath', '').trim();
+    const executableKey = `${process.platform}\0${configuredPath}`;
+    if (!nativeExecutablePromise || nativeExecutableKey !== executableKey) {
+      nativeExecutableKey = executableKey;
+      nativeExecutablePromise = findNativeOpenScad({ configuredPath });
+    }
+    const executable = await nativeExecutablePromise;
+    if (!currentPanel || generation !== renderGeneration) return;
+    if (executable) {
+      const abort = new AbortController();
+      nativeRenderAbort = abort;
+      const nativeResult = await renderNativeWrl({
+        executable,
+        code,
+        cwd: doc.uri.scheme === 'file' ? path.dirname(doc.uri.fsPath) : undefined,
+        signal: abort.signal
+      });
+      if (!currentPanel || generation !== renderGeneration || abort.signal.aborted) return;
+      nativeRenderAbort = undefined;
+      if (nativeResult.success) {
+        currentPanel.webview.postMessage({
+          type: 'nativeRender',
+          generation,
+          data: nativeResult.data.toString('base64'),
+          stderr: nativeResult.stderr,
+          milliseconds: nativeResult.milliseconds,
+          executable
+        });
+        return;
+      }
+    }
+  }
+
   const configuredFonts = cfg.get<string[]>('fontFiles', []);
   const [availableFonts, files] = await Promise.all([
     fontsForDocument(code, configuredFonts),

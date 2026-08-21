@@ -449,6 +449,7 @@ controls.addEventListener('change', refresh3dMeasurements);
 
 // --- Render pipeline ------------------------------------------------------
 let pending = 0;
+let hostRenderGeneration = 0;
 let moduleUsed = false; // true once we've called callMain on `Module`
 let documentFiles = [];
 
@@ -965,6 +966,30 @@ async function renderToScene(code) {
   }
 }
 
+function beginHostRender(generation) {
+  hostRenderGeneration = generation;
+  pending++; // Supersede any WASM render whose result has not been displayed.
+  setStatus('Rendering with native OpenSCAD…');
+  setCompileLog('Compiling with native OpenSCAD…');
+}
+
+function showNativeRender(msg) {
+  if (msg.generation !== hostRenderGeneration) return;
+  try {
+    const source = new TextDecoder().decode(decodeBase64(msg.data));
+    const summary = showWrl(parseOpenScadWrl(source));
+    setCompileLog(msg.stderr);
+    setStatus(`OK · ${msg.milliseconds} ms · Native OpenSCAD · ` +
+      `${summary.materialCount} materials · ` +
+      `${summary.triangleCount.toLocaleString()} triangles`);
+    vscode.postMessage({ type: 'rendered', success: true, stderr: msg.stderr });
+  } catch (error) {
+    setCompileLog(String(error));
+    setStatus('Native preview failed: ' + error.message, true);
+    vscode.postMessage({ type: 'rendered', success: false, stderr: String(error) });
+  }
+}
+
 async function doExport(code, format) {
   setStatus('Exporting (' + format + ')\u2026');
   setCompileLog('Compiling export\u2026');
@@ -990,7 +1015,9 @@ window.addEventListener('message', (ev) => {
   const msg = ev.data;
   registerFonts(msg?.fonts);
   registerDocumentFiles(msg?.files);
-  if (msg?.type === 'render') renderToScene(msg.code);
+  if (msg?.type === 'renderStart') beginHostRender(msg.generation);
+  else if (msg?.type === 'nativeRender') showNativeRender(msg);
+  else if (msg?.type === 'render') renderToScene(msg.code);
   else if (msg?.type === 'export') doExport(msg.code, msg.format || 'binstl');
 });
 
