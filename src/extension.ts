@@ -5,6 +5,8 @@ import { fontsForDocument } from './fonts';
 // without loading the VS Code runtime.
 // @ts-ignore
 import { findNativeOpenScad, renderNativeWrl } from './native-openscad.mjs';
+// @ts-ignore
+import { NativeRenderCache, nativeRenderCacheKey } from './render-cache.mjs';
 
 const VIEW_TYPE = 'carve.preview';
 const DIAG = vscode.languages.createDiagnosticCollection('carve');
@@ -17,6 +19,7 @@ let sentFonts = new Set<string>();
 let nativeRenderAbort: AbortController | undefined;
 let nativeExecutableKey = '';
 let nativeExecutablePromise: Promise<string | undefined> | undefined;
+const nativePreviewCache = new NativeRenderCache();
 
 interface WebviewFile {
   name: string;
@@ -36,7 +39,20 @@ function referencedFiles(code: string): string[] {
       .replace(/\\\\/g, '\\');
     if (value) files.add(value);
   }
+  const directive = /\b(?:include|use)\s*<([^>]+)>/g;
+  while ((match = directive.exec(code))) {
+    const value = match[1].trim();
+    if (value) files.add(value);
+  }
   return [...files];
+}
+
+function hasCompleteDependencySnapshot(code: string, files: WebviewFile[]): boolean {
+  const available = new Set(files.map((file) => file.name));
+  return referencedFiles(code).every((name) => {
+    if (path.isAbsolute(name) || /^[a-z][a-z0-9+.-]*:/i.test(name)) return false;
+    return available.has(name.replace(/\\/g, '/'));
+  });
 }
 
 async function filesForDocument(doc: vscode.TextDocument, code: string): Promise<WebviewFile[]> {
@@ -167,6 +183,7 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
   }
   renderedDocument = doc;
   const cfg = vscode.workspace.getConfiguration('carve', doc.uri);
+  const filesPromise = filesForDocument(doc, code);
   currentPanel.webview.postMessage({ type: 'renderStart', generation });
 
   const backend = cfg.get<string>('renderBackend', 'auto');
@@ -180,6 +197,29 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
     const executable = await nativeExecutablePromise;
     if (!currentPanel || generation !== renderGeneration) return;
     if (executable) {
+      const dependencyFiles = await filesPromise;
+      if (!currentPanel || generation !== renderGeneration) return;
+      const cacheKey = hasCompleteDependencySnapshot(code, dependencyFiles)
+        ? nativeRenderCacheKey({
+            documentUri: doc.uri.toString(),
+            code,
+            executable,
+            files: dependencyFiles
+          })
+        : undefined;
+      const cachedResult = cacheKey ? nativePreviewCache.get(cacheKey) : undefined;
+      if (cachedResult) {
+        currentPanel.webview.postMessage({
+          type: 'nativeRender',
+          generation,
+          data: cachedResult.data.toString('base64'),
+          stderr: cachedResult.stderr,
+          milliseconds: 0,
+          executable,
+          cached: true
+        });
+        return;
+      }
       const abort = new AbortController();
       nativeRenderAbort = abort;
       const nativeResult = await renderNativeWrl({
@@ -191,6 +231,7 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
       if (!currentPanel || generation !== renderGeneration || abort.signal.aborted) return;
       nativeRenderAbort = undefined;
       if (nativeResult.success) {
+        if (cacheKey) nativePreviewCache.set(cacheKey, nativeResult);
         currentPanel.webview.postMessage({
           type: 'nativeRender',
           generation,
@@ -207,7 +248,7 @@ async function renderDocument(doc: vscode.TextDocument, force: boolean) {
   const configuredFonts = cfg.get<string[]>('fontFiles', []);
   const [availableFonts, files] = await Promise.all([
     fontsForDocument(code, configuredFonts),
-    filesForDocument(doc, code)
+    filesPromise
   ]);
   if (!currentPanel || generation !== renderGeneration) return;
   const fonts = availableFonts.filter((font) => {

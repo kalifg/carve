@@ -979,7 +979,8 @@ function showNativeRender(msg) {
     const source = new TextDecoder().decode(decodeBase64(msg.data));
     const summary = showWrl(parseOpenScadWrl(source));
     setCompileLog(msg.stderr);
-    setStatus(`OK · ${msg.milliseconds} ms · Native OpenSCAD · ` +
+    const renderLabel = msg.cached ? 'Native cache' : 'Native OpenSCAD';
+    setStatus(`OK · ${msg.milliseconds} ms · ${renderLabel} · ` +
       `${summary.materialCount} materials · ` +
       `${summary.triangleCount.toLocaleString()} triangles`);
     vscode.postMessage({ type: 'rendered', success: true, stderr: msg.stderr });
